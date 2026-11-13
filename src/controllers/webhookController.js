@@ -8,69 +8,19 @@ const { FieldValue } = require("firebase-admin/firestore");
 const COLECAO_CONTRATOS = "contratos";
 const COLECAO_EVENTOS = "webhook_eventos";
 
-// ========================================
-// AUTENTICAÇÃO DO WEBHOOK
-// ========================================
-
-function compararSeguro(valorRecebido, valorEsperado) {
+function compararSeguro(recebido, esperado) {
   if (
-    typeof valorRecebido !== "string" ||
-    typeof valorEsperado !== "string"
+    typeof recebido !== "string" ||
+    typeof esperado !== "string"
   ) {
     return false;
   }
 
-  const recebido = Buffer.from(valorRecebido);
-  const esperado = Buffer.from(valorEsperado);
+  const a = Buffer.from(recebido);
+  const b = Buffer.from(esperado);
 
-  if (recebido.length !== esperado.length) {
-    return false;
-  }
-
-  return crypto.timingSafeEqual(recebido, esperado);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
-
-function autenticarWebhook(req) {
-  const usuarioEsperado = process.env.PAGARME_WEBHOOK_USERNAME;
-  const senhaEsperada = process.env.PAGARME_WEBHOOK_PASSWORD;
-
-  if (!usuarioEsperado || !senhaEsperada) {
-    return false;
-  }
-
-  const authorization = req.headers.authorization || "";
-
-  if (!authorization.startsWith("Basic ")) {
-    return false;
-  }
-
-  try {
-    const credenciais = Buffer.from(
-      authorization.slice(6),
-      "base64"
-    ).toString("utf8");
-
-    const separador = credenciais.indexOf(":");
-
-    if (separador < 0) {
-      return false;
-    }
-
-    const usuarioRecebido = credenciais.slice(0, separador);
-    const senhaRecebida = credenciais.slice(separador + 1);
-
-    return (
-      compararSeguro(usuarioRecebido, usuarioEsperado) &&
-      compararSeguro(senhaRecebida, senhaEsperada)
-    );
-  } catch {
-    return false;
-  }
-}
-
-// ========================================
-// IDENTIFICADOR DO EVENTO
-// ========================================
 
 function gerarIdentificadorEvento(evento) {
   const conteudo = evento.id
@@ -83,21 +33,20 @@ function gerarIdentificadorEvento(evento) {
     .digest("hex");
 }
 
-// ========================================
-// RECEBER WEBHOOK
-// ========================================
-
 async function receberWebhook(req, res) {
   try {
-    // 1. Validar autenticação
-    if (!autenticarWebhook(req)) {
+    // 1. Validar token secreto da URL
+    const tokenEsperado = process.env.PAGARME_WEBHOOK_TOKEN;
+    const tokenRecebido = req.params.token;
+
+    if (!compararSeguro(tokenRecebido, tokenEsperado)) {
       return res.status(401).json({
         sucesso: false,
         mensagem: "Não autorizado.",
       });
     }
 
-    // 2. Validar corpo
+    // 2. Validar evento recebido
     const evento = req.body;
 
     if (
@@ -121,7 +70,6 @@ async function receberWebhook(req, res) {
       });
     }
 
-    // 3. Processar somente eventos de pedido
     const eventosPermitidos = [
       "order.paid",
       "order.payment_failed",
@@ -135,7 +83,7 @@ async function receberWebhook(req, res) {
       });
     }
 
-    // 4. Identificar o pedido
+    // 3. Consultar o pedido diretamente na Pagar.me
     const pedidoId = dados.id;
 
     if (!pedidoId) {
@@ -145,24 +93,20 @@ async function receberWebhook(req, res) {
       });
     }
 
-    // 5. Consultar pedido diretamente na Pagar.me
-    const pedido = await consultarPedido(pedidoId);
+    const pedido = await consultarPedido(String(pedidoId));
 
-    if (!pedido || pedido.id !== pedidoId) {
+    if (!pedido || String(pedido.id) !== String(pedidoId)) {
       return res.status(400).json({
         sucesso: false,
         mensagem: "Pedido não localizado na Pagar.me.",
       });
     }
 
-    // 6. Recuperar contrato pelos metadados
+    // 4. Conferir os metadados do pedido
     const contratoId = pedido.metadata?.contratoId;
 
     if (!contratoId) {
-      console.error(
-        "Pedido sem contratoId nos metadados:",
-        pedidoId
-      );
+      console.error("Pedido sem contratoId:", pedidoId);
 
       return res.status(200).json({
         sucesso: true,
@@ -170,18 +114,15 @@ async function receberWebhook(req, res) {
       });
     }
 
-    const statusPedido = String(
-      pedido.status || ""
-    ).toLowerCase();
+    const statusPedido = String(pedido.status || "").toLowerCase();
 
-    // 7. Conferir o status real do pedido
     if (
       tipoEvento === "order.paid" &&
       statusPedido !== "paid"
     ) {
       return res.status(503).json({
         sucesso: false,
-        mensagem: "Aguardando confirmação do pagamento na Pagar.me.",
+        mensagem: "Pagamento ainda não confirmado na Pagar.me.",
       });
     }
 
@@ -205,10 +146,10 @@ async function receberWebhook(req, res) {
       });
     }
 
-    // 8. Preparar referências
+    // 5. Preparar referências do Firestore
     const contratoRef = db
       .collection(COLECAO_CONTRATOS)
-      .doc(contratoId);
+      .doc(String(contratoId));
 
     const eventoId = gerarIdentificadorEvento(evento);
 
@@ -216,11 +157,10 @@ async function receberWebhook(req, res) {
       .collection(COLECAO_EVENTOS)
       .doc(eventoId);
 
-    // 9. Atualização transacional
+    // 6. Atualizar contrato de forma transacional
     await db.runTransaction(async (transaction) => {
       const eventoDoc = await transaction.get(eventoRef);
 
-      // Impedir processamento duplicado
       if (eventoDoc.exists) {
         return;
       }
@@ -233,22 +173,23 @@ async function receberWebhook(req, res) {
 
       const contrato = contratoDoc.data();
 
-      // Conferir correspondência do pedido
-      if (contrato.pagarmeOrderId !== pedidoId) {
+      if (
+        String(contrato.pagarmeOrderId || "") !== String(pedidoId)
+      ) {
         throw new Error(
           "O pedido não corresponde ao pagarmeOrderId do contrato."
         );
       }
 
-      // Não desfazer pagamento já confirmado
+      // Um pagamento confirmado nunca será revertido
       if (
         contrato.pagamentoConfirmado === true &&
         tipoEvento !== "order.paid"
       ) {
         transaction.create(eventoRef, {
           tipo: tipoEvento,
-          pedidoId,
-          contratoId,
+          pedidoId: String(pedidoId),
+          contratoId: String(contratoId),
           processado: true,
           ignorado: true,
           motivo: "Pagamento já confirmado.",
@@ -259,13 +200,12 @@ async function receberWebhook(req, res) {
       }
 
       const atualizacao = {
-        pagarmeOrderId: pedidoId,
+        pagarmeOrderId: String(pedidoId),
         pagarmeUltimoEvento: tipoEvento,
         pagarmeAtualizadoEm: FieldValue.serverTimestamp(),
         atualizadoEm: FieldValue.serverTimestamp(),
       };
 
-      // PAGAMENTO APROVADO
       if (tipoEvento === "order.paid") {
         atualizacao.statusPagamento = "Pago";
         atualizacao.pagamentoConfirmado = true;
@@ -274,13 +214,11 @@ async function receberWebhook(req, res) {
           FieldValue.serverTimestamp();
       }
 
-      // PAGAMENTO RECUSADO
       if (tipoEvento === "order.payment_failed") {
         atualizacao.statusPagamento = "Pagamento recusado";
         atualizacao.pagamentoConfirmado = false;
       }
 
-      // PEDIDO CANCELADO
       if (tipoEvento === "order.canceled") {
         atualizacao.statusPagamento = "Cancelado";
         atualizacao.pagamentoConfirmado = false;
@@ -291,8 +229,8 @@ async function receberWebhook(req, res) {
 
       transaction.create(eventoRef, {
         tipo: tipoEvento,
-        pedidoId,
-        contratoId,
+        pedidoId: String(pedidoId),
+        contratoId: String(contratoId),
         processado: true,
         criadoEm: FieldValue.serverTimestamp(),
       });
@@ -302,7 +240,6 @@ async function receberWebhook(req, res) {
       sucesso: true,
       mensagem: "Notificação recebida e processada.",
     });
-
   } catch (error) {
     console.error("Erro ao processar webhook:", {
       mensagem: error.message,

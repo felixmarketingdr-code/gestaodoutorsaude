@@ -1,17 +1,7 @@
+
 const ambiente = process.env.PAGARME_ENV || "test";
 
-const configuracoes = {
-  test: {
-    baseURL: "https://sdx-api.pagar.me/core/v5",
-  },
-  production: {
-    baseURL: "https://api.pagar.me/core/v5",
-  },
-};
-
-const config = configuracoes[ambiente];
-
-if (!config) {
+if (!["test", "production"].includes(ambiente)) {
   throw new Error("PAGARME_ENV deve ser test ou production.");
 }
 
@@ -22,7 +12,8 @@ if (!secretKey) {
 }
 
 module.exports = {
-  baseURL: config.baseURL,
+  baseURL: "https://api.pagar.me/core/v5",
   secretKey,
   publicKey: process.env.PAGARME_PUBLIC_KEY || "",
+  ambiente,
 };
