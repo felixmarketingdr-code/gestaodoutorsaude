@@ -8,6 +8,7 @@ const { rateLimit } = require("express-rate-limit");
 
 // Rotas
 const checkoutRoutes = require("./src/routes/checkoutRoutes");
+const webhookRoutes = require("./src/routes/webhookRoutes");
 
 const app = express();
 
@@ -63,6 +64,9 @@ app.use(express.json({ limit: "1mb" }));
 // Checkout e criação de pedidos Pagar.me
 app.use("/api/checkout", checkoutRoutes);
 
+// Webhook de notificações da Pagar.me
+app.use("/api/webhooks/pagarme", webhookRoutes);
+
 // Verificação de funcionamento do backend
 app.get("/api/health", (req, res) => {
   res.json({
@@ -115,5 +119,6 @@ app.listen(PORT, () => {
   console.log(`Ambiente: ${process.env.NODE_ENV || "development"}`);
   console.log(`Health: http://localhost:${PORT}/api/health`);
   console.log(`Checkout: http://localhost:${PORT}/api/checkout`);
+  console.log(`Webhook: /api/webhooks/pagarme`);
   console.log("------------------------------------");
 });
