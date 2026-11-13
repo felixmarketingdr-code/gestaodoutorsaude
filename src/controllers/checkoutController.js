@@ -5,10 +5,17 @@ const { FieldValue } = require("firebase-admin/firestore");
 
 const COLECAO_PLANOS = "planos";
 const COLECAO_CONTRATOS = "contratos";
+const COLECAO_CLIENTES = "clientes";
 
-// ========================================
-// CONVERSÃO DE VALORES
-// ========================================
+const METODOS_PAGAMENTO = ["pix", "credit_card", "boleto"];
+
+// =====================================================
+// FUNÇÕES AUXILIARES
+// =====================================================
+
+function somenteNumeros(valor) {
+  return String(valor || "").replace(/\D/g, "");
+}
 
 function paraCentavos(valor) {
   const numero = Number(valor);
@@ -20,74 +27,53 @@ function paraCentavos(valor) {
   return Math.round(numero * 100);
 }
 
-// ========================================
-// CÁLCULO DO VALOR DO PLANO
-// ========================================
+function normalizarMetodoPagamento(valor) {
+  const metodo = String(valor || "")
+    .trim()
+    .toLowerCase();
 
-function calcularValorPlano(plano, modalidade) {
-  if (modalidade === "mensal") {
-    if (!plano.modalidadeMensal) {
-      throw new Error("Este plano não permite pagamento mensal.");
-    }
+  const aliases = {
+    pix: "pix",
+    credit_card: "credit_card",
+    cartao: "credit_card",
+    "cartão": "credit_card",
+    "cartao de credito": "credit_card",
+    "cartão de crédito": "credit_card",
+    boleto: "boleto",
+    bank_slip: "boleto",
+    "boleto bancario": "boleto",
+    "boleto bancário": "boleto",
+  };
 
-    const valor = Number(plano.valorMensal);
-
-    if (!Number.isFinite(valor) || valor <= 0) {
-      throw new Error("Valor mensal do plano inválido.");
-    }
-
-    return {
-      valor,
-      parcelas: 1,
-      total: valor,
-    };
-  }
-
-  if (modalidade === "anual") {
-    if (!plano.modalidadeAnual) {
-      throw new Error("Este plano não permite contratação anual.");
-    }
-
-    const valorParcela = Number(plano.valorParcelaAnual);
-    const quantidadeParcelas = Number(plano.parcelasAnuais || 12);
-
-    if (
-      !Number.isFinite(valorParcela) ||
-      valorParcela <= 0 ||
-      !Number.isInteger(quantidadeParcelas) ||
-      quantidadeParcelas < 1 ||
-      quantidadeParcelas > 12
-    ) {
-      throw new Error("Condições anuais do plano inválidas.");
-    }
-
-    return {
-      valor: valorParcela,
-      parcelas: quantidadeParcelas,
-      total: Number(
-        (valorParcela * quantidadeParcelas).toFixed(2)
-      ),
-    };
-  }
-
-  throw new Error("Modalidade inválida. Utilize mensal ou anual.");
+  return aliases[metodo] || metodo;
 }
 
-// ========================================
-// VALIDAÇÃO DO CLIENTE
-// ========================================
+// =====================================================
+// VALIDAR CLIENTE
+// =====================================================
 
 function validarCliente(cliente) {
   if (!cliente || typeof cliente !== "object") {
     throw new Error("Informe os dados do cliente.");
   }
 
-  const nome = String(cliente.nome || "").trim();
-  const email = String(cliente.email || "").trim().toLowerCase();
+  const nome = String(
+    cliente.nome || cliente.nomeCompleto || ""
+  ).trim();
 
-  const documento = String(cliente.documento || "").replace(/\D/g, "");
+  const email = String(cliente.email || "")
+    .trim()
+    .toLowerCase();
 
-  const telefone = String(cliente.telefone || "").replace(/\D/g, "");
+  const documento = somenteNumeros(
+    cliente.documento || cliente.cpf || cliente.cnpj
+  );
+
+  const telefone = somenteNumeros(
+    cliente.telefone ||
+    cliente.celular ||
+    cliente.whatsapp
+  );
 
   if (nome.length < 3) {
     throw new Error("Informe o nome completo do cliente.");
@@ -102,7 +88,7 @@ function validarCliente(cliente) {
   }
 
   if (telefone.length < 10 || telefone.length > 11) {
-    throw new Error("Informe um telefone válido com DDD.");
+    throw new Error("Informe um telefone com DDD válido.");
   }
 
   return {
@@ -115,9 +101,9 @@ function validarCliente(cliente) {
   };
 }
 
-// ========================================
-// FORMATAÇÃO DO TELEFONE
-// ========================================
+// =====================================================
+// TELEFONE PARA PAGAR.ME
+// =====================================================
 
 function formatarTelefone(telefone) {
   return {
@@ -127,19 +113,350 @@ function formatarTelefone(telefone) {
   };
 }
 
-// ========================================
-// CRIAÇÃO DO CHECKOUT
-// ========================================
+// =====================================================
+// CALCULAR VALORES
+// =====================================================
+
+function calcularValorPlano(plano, modalidade) {
+  if (modalidade === "mensal") {
+    if (plano.modalidadeMensal === false) {
+      throw new Error(
+        "Este plano não permite pagamento mensal."
+      );
+    }
+
+    const valor = Number(plano.valorMensal);
+
+    if (!Number.isFinite(valor) || valor <= 0) {
+      throw new Error("Valor mensal do plano inválido.");
+    }
+
+    return {
+      valorParcela: valor,
+      parcelas: 1,
+      total: valor,
+    };
+  }
+
+  if (modalidade === "anual") {
+    if (plano.modalidadeAnual === false) {
+      throw new Error(
+        "Este plano não permite contratação anual."
+      );
+    }
+
+    const valorParcela = Number(plano.valorParcelaAnual);
+    const parcelas = Number(plano.parcelasAnuais || 12);
+
+    if (
+      !Number.isFinite(valorParcela) ||
+      valorParcela <= 0 ||
+      !Number.isInteger(parcelas) ||
+      parcelas < 1 ||
+      parcelas > 12
+    ) {
+      throw new Error(
+        "Condições anuais do plano inválidas."
+      );
+    }
+
+    return {
+      valorParcela,
+      parcelas,
+      total: Number(
+        (valorParcela * parcelas).toFixed(2)
+      ),
+    };
+  }
+
+  throw new Error(
+    "Modalidade inválida. Utilize mensal ou anual."
+  );
+}
+
+// =====================================================
+// NORMALIZAR ENDEREÇO
+// =====================================================
+
+function normalizarEndereco(endereco) {
+  if (!endereco || typeof endereco !== "object") {
+    return null;
+  }
+
+  const rua =
+    endereco.rua ||
+    endereco.logradouro ||
+    endereco.street ||
+    endereco.line_1 ||
+    "";
+
+  const numero =
+    endereco.numero ||
+    endereco.number ||
+    "";
+
+  const complemento =
+    endereco.complemento ||
+    endereco.complement ||
+    endereco.line_2 ||
+    "";
+
+  const bairro =
+    endereco.bairro ||
+    endereco.neighborhood ||
+    "";
+
+  const cidade =
+    endereco.cidade ||
+    endereco.city ||
+    "";
+
+  const estado =
+    endereco.estado ||
+    endereco.uf ||
+    endereco.state ||
+    "";
+
+  const cep = somenteNumeros(
+    endereco.cep ||
+    endereco.cepCodigo ||
+    endereco.zip_code
+  );
+
+  if (
+    !rua ||
+    !numero ||
+    !bairro ||
+    !cidade ||
+    !estado ||
+    cep.length !== 8
+  ) {
+    return null;
+  }
+
+  return {
+    line_1: `${String(rua).trim()}, ${String(numero).trim()}`,
+
+    ...(complemento
+      ? { line_2: String(complemento).trim() }
+      : {}),
+
+    zip_code: cep,
+    city: String(cidade).trim(),
+    state: String(estado).trim().toUpperCase(),
+    country: "BR",
+  };
+}
+
+// =====================================================
+// CLIENTE PARA PAGAR.ME
+// =====================================================
+
+function montarClientePagarme(cliente, endereco) {
+  const customer = {
+    name: cliente.nome,
+    email: cliente.email,
+    document: cliente.documento,
+    type: cliente.tipoDocumento,
+
+    document_type:
+      cliente.tipoDocumento === "individual"
+        ? "CPF"
+        : "CNPJ",
+
+    phones: {
+      mobile_phone: formatarTelefone(cliente.telefone),
+    },
+  };
+
+  if (endereco) {
+    customer.address = endereco;
+  }
+
+  return customer;
+}
+
+// =====================================================
+// MONTAR PAGAMENTO
+// =====================================================
+
+function montarPagamento({
+  metodoPagamento,
+  parcelas,
+  cardToken,
+}) {
+  if (metodoPagamento === "pix") {
+    return {
+      payment_method: "pix",
+
+      pix: {
+        expires_in: 3600,
+      },
+    };
+  }
+
+  if (metodoPagamento === "credit_card") {
+    if (!cardToken || typeof cardToken !== "string") {
+      throw new Error("Token do cartão não informado.");
+    }
+
+    return {
+      payment_method: "credit_card",
+
+      credit_card: {
+        installments: parcelas,
+        statement_descriptor: "DOUTOR DE TODOS",
+        card_token: cardToken,
+      },
+    };
+  }
+
+  if (metodoPagamento === "boleto") {
+    const vencimento = new Date();
+
+    vencimento.setDate(vencimento.getDate() + 3);
+
+    return {
+      payment_method: "boleto",
+
+      boleto: {
+        due_at: vencimento.toISOString(),
+
+        instructions:
+          "Pagamento referente à contratação do plano Doutor de Todos.",
+
+        type: "DM",
+      },
+    };
+  }
+
+  throw new Error(
+    `Forma de pagamento não suportada: ${metodoPagamento || "não informada"}.`
+  );
+}
+
+// =====================================================
+// EXTRAIR DADOS DO PAGAMENTO
+// =====================================================
+
+function extrairDadosPagamento(pedido) {
+  const cobranca =
+    pedido?.charges?.[0] ||
+    pedido?.charge ||
+    {};
+
+  const transacao =
+    cobranca?.last_transaction ||
+    cobranca?.transaction ||
+    pedido?.last_transaction ||
+    {};
+
+  return {
+    orderId: pedido?.id || null,
+
+    chargeId: cobranca?.id || null,
+
+    status:
+      cobranca?.status ||
+      pedido?.status ||
+      "pending",
+
+    qrCode:
+      transacao?.qr_code ||
+      transacao?.qr_code_text ||
+      transacao?.qr_code_string ||
+      null,
+
+    qrCodeUrl:
+      transacao?.qr_code_url ||
+      transacao?.qr_code_image_url ||
+      transacao?.qr_code_image ||
+      null,
+
+    pixExpiraEm:
+      transacao?.expires_at ||
+      transacao?.expiration_date ||
+      null,
+
+    boletoUrl:
+      transacao?.url ||
+      transacao?.pdf ||
+      transacao?.boleto_url ||
+      transacao?.bank_slip_url ||
+      transacao?.boleto?.url ||
+      cobranca?.boleto_url ||
+      null,
+
+    boletoLinha:
+      transacao?.line ||
+      transacao?.barcode ||
+      transacao?.digitable_line ||
+      transacao?.linha_digitavel ||
+      null,
+  };
+}
+
+// =====================================================
+// IDENTIFICAR ADMINISTRADOR
+// =====================================================
+
+function extrairPapelUsuario(req) {
+  return String(
+    req.usuario?.role ||
+    req.usuario?.perfil ||
+    req.usuario?.tipoUsuario ||
+    ""
+  ).toLowerCase();
+}
+
+// =====================================================
+// BUSCAR ENDEREÇO DO CLIENTE
+// =====================================================
+
+async function carregarEnderecoCliente(
+  clienteId,
+  enderecoRecebido
+) {
+  const enderecoDoCheckout =
+    normalizarEndereco(enderecoRecebido);
+
+  if (enderecoDoCheckout) {
+    return enderecoDoCheckout;
+  }
+
+  if (!clienteId) {
+    return null;
+  }
+
+  const snapshot = await db
+    .collection(COLECAO_CLIENTES)
+    .doc(String(clienteId))
+    .get();
+
+  if (!snapshot.exists) {
+    return null;
+  }
+
+  const dados = snapshot.data() || {};
+
+  return (
+    normalizarEndereco(dados.endereco) ||
+    normalizarEndereco(dados.enderecoCobranca) ||
+    normalizarEndereco(dados.address) ||
+    normalizarEndereco(dados)
+  );
+}
+
+// =====================================================
+// CRIAR CHECKOUT
+// =====================================================
 
 async function criarCheckout(req, res) {
   let contratoRef = null;
   let pedidoCriado = false;
+  let contratoEraExistente = false;
 
   try {
-    // ------------------------------------
-    // 1. IDENTIFICAR USUÁRIO
-    // ------------------------------------
-
     const uid = req.usuario?.uid;
 
     if (!uid) {
@@ -149,17 +466,33 @@ async function criarCheckout(req, res) {
       });
     }
 
-    // ------------------------------------
-    // 2. RECEBER DADOS
-    // ------------------------------------
+    const body = req.body || {};
 
-    const {
-      planoId,
-      modalidade,
-      metodoPagamento,
-      cliente: clienteRecebido,
-      cardToken,
-    } = req.body || {};
+    const planoId = body.planoId;
+
+    const modalidade = String(
+      body.modalidade || ""
+    ).trim().toLowerCase();
+
+    const metodoPagamento = normalizarMetodoPagamento(
+      body.metodoPagamento
+    );
+
+    const clienteRecebido = body.cliente;
+    const cardToken = body.cardToken;
+
+    const clienteId = body.clienteId
+      ? String(body.clienteId)
+      : "";
+
+    const contratoId = body.contratoId
+      ? String(body.contratoId)
+      : "";
+
+    const enderecoRecebido =
+      body.billingAddress ||
+      body.enderecoCobranca ||
+      null;
 
     if (!planoId || !modalidade || !metodoPagamento) {
       return res.status(400).json({
@@ -169,16 +502,16 @@ async function criarCheckout(req, res) {
       });
     }
 
-    if (!["pix", "credit_card"].includes(metodoPagamento)) {
+    if (!METODOS_PAGAMENTO.includes(metodoPagamento)) {
       return res.status(400).json({
         sucesso: false,
-        mensagem: "Forma de pagamento não suportada.",
+        mensagem: `Forma de pagamento não suportada: ${metodoPagamento}.`,
       });
     }
 
     if (
       metodoPagamento === "credit_card" &&
-      (typeof cardToken !== "string" || !cardToken.trim())
+      (!cardToken || typeof cardToken !== "string")
     ) {
       return res.status(400).json({
         sucesso: false,
@@ -186,13 +519,16 @@ async function criarCheckout(req, res) {
       });
     }
 
+    // Validar dados do cliente.
+
     const cliente = validarCliente(clienteRecebido);
 
-    // ------------------------------------
-    // 3. BUSCAR PLANO NO FIRESTORE
-    // ------------------------------------
+    // Buscar plano no Firestore.
 
-    const planoRef = db.collection(COLECAO_PLANOS).doc(planoId);
+    const planoRef = db
+      .collection(COLECAO_PLANOS)
+      .doc(String(planoId));
+
     const planoSnapshot = await planoRef.get();
 
     if (!planoSnapshot.exists) {
@@ -202,43 +538,111 @@ async function criarCheckout(req, res) {
       });
     }
 
-    const plano = planoSnapshot.data();
+    const plano = planoSnapshot.data() || {};
 
-    if (plano.ativo === false) {
+    const valores = calcularValorPlano(
+      plano,
+      modalidade
+    );
+
+    const valorCentavos = paraCentavos(valores.total);
+
+    const parcelasCartao =
+      modalidade === "anual" &&
+      metodoPagamento === "credit_card"
+        ? valores.parcelas
+        : 1;
+
+    // Buscar endereço de cobrança.
+
+    const enderecoPagarme =
+      await carregarEnderecoCliente(
+        clienteId,
+        enderecoRecebido
+      );
+
+    if (
+      (metodoPagamento === "boleto" ||
+        metodoPagamento === "credit_card") &&
+      !enderecoPagarme
+    ) {
       return res.status(400).json({
         sucesso: false,
-        mensagem: "Este plano não está disponível para contratação.",
+        mensagem:
+          "Para cartão ou boleto, informe o endereço de cobrança completo do cliente: rua, número, bairro, cidade, UF e CEP.",
       });
     }
 
-    // ------------------------------------
-    // 4. CALCULAR VALORES NO SERVIDOR
-    // ------------------------------------
+    // Montar pagamento.
 
-    const condicoes = calcularValorPlano(plano, modalidade);
+    const pagamento = montarPagamento({
+      metodoPagamento,
+      parcelas: parcelasCartao,
+      cardToken,
+    });
 
-    let valorCobranca;
+    // =================================================
+    // LOCALIZAR OU CRIAR CONTRATO
+    // =================================================
 
-    if (modalidade === "anual") {
-      valorCobranca = condicoes.total;
+    if (contratoId) {
+      contratoRef = db
+        .collection(COLECAO_CONTRATOS)
+        .doc(contratoId);
+
+      const contratoSnapshot = await contratoRef.get();
+
+      if (!contratoSnapshot.exists) {
+        return res.status(404).json({
+          sucesso: false,
+          mensagem:
+            "O contrato informado não foi encontrado. Atualize a tela e tente novamente.",
+        });
+      }
+
+      const contratoAtual = contratoSnapshot.data() || {};
+
+      const responsavelAtual =
+        contratoAtual.vendedorId ||
+        contratoAtual.usuarioUid ||
+        contratoAtual.criadoPor ||
+        "";
+
+      const papel = extrairPapelUsuario(req);
+
+      const ehAdmin =
+        req.usuario?.admin === true ||
+        req.usuario?.administrador === true ||
+        ["admin", "administrador", "administracao"].includes(
+          papel
+        );
+
+      if (
+        responsavelAtual &&
+        responsavelAtual !== uid &&
+        !ehAdmin
+      ) {
+        return res.status(403).json({
+          sucesso: false,
+          mensagem:
+            "Você não tem permissão para gerar pagamento para este contrato.",
+        });
+      }
+
+      contratoEraExistente = true;
     } else {
-      valorCobranca = condicoes.valor;
+      contratoRef = db
+        .collection(COLECAO_CONTRATOS)
+        .doc();
     }
 
-    const valorCentavos = paraCentavos(valorCobranca);
-
-    const quantidadeParcelas =
-      metodoPagamento === "credit_card" && modalidade === "anual"
-        ? condicoes.parcelas
-        : 1;
-
-    // ------------------------------------
-    // 5. CRIAR CONTRATO NO FIRESTORE
-    // ------------------------------------
-
-    contratoRef = db.collection(COLECAO_CONTRATOS).doc();
+    // =================================================
+    // SALVAR DADOS DO CONTRATO
+    // =================================================
 
     const dadosContrato = {
+      ...(clienteId ? { clienteId } : {}),
+
       usuarioUid: uid,
 
       cliente: {
@@ -248,104 +652,89 @@ async function criarCheckout(req, res) {
         telefone: cliente.telefone,
       },
 
-      planoId,
-      planoNome: plano.nome || plano.planoNome || "Plano",
+      planoId: String(planoId),
+
+      planoNome:
+        plano.nome ||
+        plano.nomePlano ||
+        "Plano Doutor de Todos",
 
       modalidade,
       metodoPagamento,
 
-      valorParcela: condicoes.valor,
-      quantidadeParcelas,
-      valorTotal: valorCobranca,
+      valorParcela: valores.valorParcela,
+      quantidadeParcelas: valores.parcelas,
+      valorTotal: valores.total,
 
       status: "Em Cadastramento",
+      statusLabel: "Em Cadastramento",
       statusPagamento: "Aguardando pagamento",
+
       pagamentoConfirmado: false,
+      tipoCobranca: "avulsa",
 
-      pagarmeOrderId: null,
-      pagarmeChargeId: null,
-
-      pagarmeUltimoEvento: null,
-
-      criadoEm: FieldValue.serverTimestamp(),
       atualizadoEm: FieldValue.serverTimestamp(),
     };
 
-    await contratoRef.set(dadosContrato);
+    if (contratoEraExistente) {
+      await contratoRef.set(
+        {
+          ...dadosContrato,
+          checkoutIniciadoEm: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    } else {
+      await contratoRef.set({
+        ...dadosContrato,
+        criadoEm: FieldValue.serverTimestamp(),
+      });
+    }
 
-    // ------------------------------------
-    // 6. MONTAR PEDIDO PAGAR.ME
-    // ------------------------------------
+    // =================================================
+    // MONTAR PEDIDO PAGAR.ME
+    // =================================================
 
     const pedido = {
       code: contratoRef.id,
 
-      customer: {
-        name: cliente.nome,
-        email: cliente.email,
-        document: cliente.documento,
-        type: cliente.tipoDocumento,
-
-        phones: {
-          mobile_phone: formatarTelefone(cliente.telefone),
-        },
-      },
+      customer: montarClientePagarme(
+        cliente,
+        enderecoPagarme
+      ),
 
       items: [
         {
           amount: valorCentavos,
-          description: `${plano.nome || plano.planoNome || "Plano"} - ${modalidade}`,
+
+          description:
+            `Plano ${plano.nome || plano.nomePlano || "Doutor de Todos"} - ${modalidade}`,
+
           quantity: 1,
-          code: planoId,
+          code: String(planoId),
         },
       ],
 
-      payments: [],
+      payments: [pagamento],
 
       metadata: {
         contratoId: contratoRef.id,
+        clienteId: clienteId || "",
         usuarioUid: uid,
-        planoId,
+        planoId: String(planoId),
         modalidade,
         metodoPagamento,
       },
     };
 
-    // ------------------------------------
-    // 7. CONFIGURAR PIX
-    // ------------------------------------
+    // =================================================
+    // ENVIAR PEDIDO
+    // =================================================
 
-    if (metodoPagamento === "pix") {
-      pedido.payments.push({
-        payment_method: "pix",
-        pix: {
-          expires_in: 3600,
-        },
-      });
-    }
+    const pedidoResposta =
+      await pagarmeService.criarPedido(pedido);
 
-    // ------------------------------------
-    // 8. CONFIGURAR CARTÃO
-    // ------------------------------------
-
-    if (metodoPagamento === "credit_card") {
-      pedido.payments.push({
-        payment_method: "credit_card",
-        credit_card: {
-          installments: quantidadeParcelas,
-          card_token: cardToken.trim(),
-          statement_descriptor: "DOUTOR DE TODOS",
-        },
-      });
-    }
-
-    // ------------------------------------
-    // 9. CRIAR PEDIDO NA PAGAR.ME
-    // ------------------------------------
-
-    const resultado = await pagarmeService.criarPedido(pedido);
-
-    if (!resultado || !resultado.id) {
+    if (!pedidoResposta?.id) {
       throw new Error(
         "A Pagar.me não retornou o identificador do pedido."
       );
@@ -353,56 +742,66 @@ async function criarCheckout(req, res) {
 
     pedidoCriado = true;
 
-    const cobranca = resultado.charges?.[0] || null;
-    const transacao = cobranca?.last_transaction || null;
+    const dadosPagamento =
+      extrairDadosPagamento(pedidoResposta);
 
-    // ------------------------------------
-    // 10. ATUALIZAR CONTRATO
-    // ------------------------------------
+    // =================================================
+    // ATUALIZAR CONTRATO COM DADOS DO PAGAMENTO
+    // =================================================
 
     await contratoRef.update({
-      pagarmeOrderId: resultado.id,
-      pagarmeChargeId: cobranca?.id || null,
+      ...(clienteId ? { clienteId } : {}),
 
-      status: "Pendente",
+      pagarmeOrderId: dadosPagamento.orderId,
+      pagarmeChargeId: dadosPagamento.chargeId,
+
+      status: "Em Cadastramento",
+      statusLabel: "Em Cadastramento",
       statusPagamento: "Aguardando pagamento",
-      pagamentoConfirmado: false,
 
-      checkoutCriadoEm: FieldValue.serverTimestamp(),
+      pagarmeStatus: dadosPagamento.status,
+
+      qrCode: dadosPagamento.qrCode,
+      qrCodeUrl: dadosPagamento.qrCodeUrl,
+      pixExpiraEm: dadosPagamento.pixExpiraEm,
+
+      boletoUrl: dadosPagamento.boletoUrl,
+      boletoLinha: dadosPagamento.boletoLinha,
+
       atualizadoEm: FieldValue.serverTimestamp(),
     });
 
-    // ------------------------------------
-    // 11. RETORNAR RESULTADO AO FRONTEND
-    // ------------------------------------
+    // =================================================
+    // RESPOSTA AO FRONTEND
+    // =================================================
 
     return res.status(201).json({
       sucesso: true,
+
       mensagem: "Pedido de pagamento criado.",
 
       contratoId: contratoRef.id,
-      pedidoId: resultado.id,
+      clienteId: clienteId || null,
 
-      status: "Pendente",
+      pedidoId: dadosPagamento.orderId,
+      cobrancaId: dadosPagamento.chargeId,
+
+      status: dadosPagamento.status,
       statusPagamento: "Aguardando pagamento",
 
-      pagamento: {
-        metodo: metodoPagamento,
-        valor: valorCobranca,
-        valorCentavos,
+      metodoPagamento,
+      modalidade,
 
-        parcelas: quantidadeParcelas,
+      valorParcela: valores.valorParcela,
+      parcelas: valores.parcelas,
+      valorTotal: valores.total,
 
-        pix:
-          metodoPagamento === "pix" && transacao
-            ? {
-                codigo: transacao.qr_code || null,
-                imagem: transacao.qr_code_url || null,
-                copiaECola: transacao.qr_code || null,
-                expiracao: transacao.expires_at || null,
-              }
-            : null,
-      },
+      qr_code: dadosPagamento.qrCode,
+      qr_code_url: dadosPagamento.qrCodeUrl,
+      pix_expira_em: dadosPagamento.pixExpiraEm,
+
+      boleto_url: dadosPagamento.boletoUrl,
+      boleto_linha: dadosPagamento.boletoLinha,
     });
   } catch (error) {
     console.error("Erro ao criar checkout:", {
@@ -411,37 +810,36 @@ async function criarCheckout(req, res) {
       detalhes: error.detalhes || null,
     });
 
-    // Se o pedido já foi criado na Pagar.me,
-    // não marcar o contrato como pagamento falho.
-    // Ele precisa ser conciliado para evitar duplicidade.
+    // Se o pedido não foi criado, registrar falha no contrato.
 
     if (contratoRef && !pedidoCriado) {
       try {
         await contratoRef.update({
-          status: "Em Cadastramento",
-          statusPagamento: "Falha na criação do pagamento",
-          erroCheckout: error.message,
+          statusPagamento: "Falha ao criar pagamento",
+
+          erroPagamento: String(
+            error.message || "Erro desconhecido"
+          ),
+
           atualizadoEm: FieldValue.serverTimestamp(),
         });
-      } catch (erroAtualizacao) {
+      } catch (erroFirestore) {
         console.error(
-          "Não foi possível atualizar o contrato:",
-          erroAtualizacao.message
+          "Não foi possível atualizar o contrato após a falha:",
+          erroFirestore.message
         );
       }
     }
 
-    const status = error.status || 500;
+    return res.status(error.status || 500).json({
+      sucesso: false,
 
-    return res
-      .status(status >= 400 && status < 600 ? status : 500)
-      .json({
-        sucesso: false,
-        mensagem:
-          pedidoCriado
-            ? "O pedido foi criado, mas houve uma falha ao atualizar o contrato. É necessária uma conferência antes de tentar novamente."
-            : error.message || "Não foi possível criar o checkout.",
-      });
+      mensagem:
+        error.message ||
+        "Não foi possível iniciar o checkout.",
+
+      detalhes: error.detalhes || undefined,
+    });
   }
 }
 

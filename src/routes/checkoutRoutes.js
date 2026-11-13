@@ -1,12 +1,10 @@
 
 const express = require("express");
-
 const autenticarUsuario = require("../middlewares/autenticarUsuario");
 const checkoutController = require("../controllers/checkoutController");
 
 const router = express.Router();
 
-// Criar checkout: exige usuário autenticado no Firebase.
 router.post(
   "/",
   autenticarUsuario,
