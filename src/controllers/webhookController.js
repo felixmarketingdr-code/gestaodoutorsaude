@@ -152,7 +152,6 @@ function extrairDadosConfirmacao(pedido, contrato) {
   };
 }
 
-
 // =====================================================
 // PROCESSAR PAGAMENTO DE VENDA DE EXAMES
 // =====================================================
@@ -366,6 +365,180 @@ async function processarWebhookVendaExame({
   };
 }
 
+
+
+// =====================================================
+// PROCESSAR PAGAMENTO DE VENDA DE CONSULTA
+// =====================================================
+
+async function processarWebhookVendaConsulta({
+  pedido,
+  pedidoId,
+  tipoEvento,
+  evento,
+  statusPedido,
+}) {
+  const vendaId = String(pedido?.metadata?.vendaId || "").trim();
+  if (!vendaId || String(pedido?.metadata?.tipoVenda || "").toLowerCase() !== "consultas") {
+    throw new Error("Metadados da venda de consultas ausentes ou inválidos.");
+  }
+
+  const vendaRef = db.collection("vendasConsultas").doc(vendaId);
+  const eventoId = gerarIdentificadorEvento(evento);
+  const chaveEvento = tipoEvento === "order.paid"
+    ? crypto.createHash("sha256").update(`consultas:order.paid:${pedidoId}`).digest("hex")
+    : eventoId;
+
+  const eventoRef = db.collection(COLECAO_EVENTOS).doc(`consultas_${chaveEvento}`);
+  const historicoVendaRef = vendaRef.collection("historico").doc(chaveEvento);
+  const historicoCentralRef = db.collection("historicoVendasConsultas")
+    .doc(vendaId).collection("eventos").doc(chaveEvento);
+
+  let resultado = "processado";
+
+  await db.runTransaction(async (transaction) => {
+    const [eventoDoc, vendaDoc] = await Promise.all([
+      transaction.get(eventoRef),
+      transaction.get(vendaRef),
+    ]);
+
+    if (eventoDoc.exists) {
+      resultado = "duplicado";
+      return;
+    }
+    if (!vendaDoc.exists) {
+      const erro = new Error("Venda de consulta não encontrada.");
+      erro.status = 404;
+      throw erro;
+    }
+
+    const venda = vendaDoc.data() || {};
+    if (String(venda.pagarmeOrderId || "") !== String(pedidoId)) {
+      const erro = new Error("O pedido da Pagar.me não corresponde à cobrança registrada na venda de consulta.");
+      erro.status = 409;
+      throw erro;
+    }
+
+    const cobranca = obterCobranca(pedido);
+    const valorEsperado = Number(venda.valorCobrado ?? venda.valorTotal ?? venda.valor);
+    if (tipoEvento === "order.paid") {
+      const centavos = Number(cobranca.amount || pedido?.amount || 0);
+      const recebido = centavos > 0 ? Number((centavos / 100).toFixed(2)) : null;
+      if (!Number.isFinite(valorEsperado) || valorEsperado <= 0 ||
+          recebido === null || Math.abs(recebido - valorEsperado) > 0.01) {
+        const erro = new Error("O valor confirmado pela Pagar.me não corresponde ao valor da consulta. Pagamento não sincronizado.");
+        erro.status = 409;
+        throw erro;
+      }
+    }
+
+    const agora = FieldValue.serverTimestamp();
+    if (venda.pagamentoConfirmado === true && tipoEvento !== "order.paid") {
+      transaction.create(eventoRef, {
+        tipo: tipoEvento, pedidoId: String(pedidoId), vendaId,
+        processado: true, ignorado: true,
+        motivo: "Pagamento já confirmado. Evento posterior ignorado.",
+        criadoEm: agora,
+      });
+      resultado = "ignorado_pagamento_confirmado";
+      return;
+    }
+
+    const atualizacao = {
+      pagarmeUltimoEvento: tipoEvento,
+      pagarmeStatus: statusPedido,
+      pagarmeAtualizadoEm: agora,
+      atualizadoEm: agora,
+    };
+    let statusPagamento = venda.statusPagamento || "Aguardando pagamento";
+    let descricao = "Status do pagamento da consulta atualizado pela Pagar.me.";
+
+    if (tipoEvento === "order.paid") {
+      Object.assign(atualizacao, {
+        statusPagamento: "Pago",
+        statusPagamentoLabel: "Pago",
+        pagamentoConfirmado: true,
+        pagamentoConfirmadoEm: agora,
+        valorPago: valorEsperado,
+        valorCobrado: valorEsperado,
+        checkoutStatus: "pago",
+      });
+      statusPagamento = "Pago";
+      descricao = "Pagamento da consulta confirmado pela Pagar.me após consulta do pedido.";
+    } else if (tipoEvento === "order.payment_failed") {
+      Object.assign(atualizacao, {
+        statusPagamento: "Pagamento recusado",
+        statusPagamentoLabel: "Pagamento recusado",
+        pagamentoConfirmado: false,
+        checkoutStatus: "pagamento_recusado",
+      });
+      statusPagamento = "Pagamento recusado";
+      descricao = "A Pagar.me informou que o pagamento da consulta não foi aprovado.";
+    } else if (tipoEvento === "order.canceled") {
+      Object.assign(atualizacao, {
+        statusPagamento: "Cancelado",
+        statusPagamentoLabel: "Cancelado",
+        pagamentoConfirmado: false,
+        checkoutStatus: "cancelado",
+      });
+      statusPagamento = "Cancelado";
+      descricao = "Pedido de pagamento da consulta cancelado na Pagar.me.";
+    }
+
+    const historico = {
+      vendaId,
+      eventoId: chaveEvento,
+      tipo: "atualizacao_pagamento_consulta",
+      evento: tipoEvento,
+      descricao,
+      pagarmeOrderId: String(pedidoId),
+      pagarmeChargeId: cobranca.id || venda.pagarmeChargeId || null,
+      pagarmeStatus: statusPedido,
+      clienteNome: venda.clienteNome || "",
+      clienteCPF: venda.clienteCPF || "",
+      clinicaNome: venda.clinicaNome || venda.clinica || "",
+      especialidade: venda.especialidade || "",
+      medico: venda.medico || "",
+      dataAgendamento: venda.dataAgendamento || "",
+      horarioAgendamento: venda.horarioAgendamento || "",
+      valorTotal: Number(venda.valorTotal ?? venda.valor ?? 0),
+      valorPago: tipoEvento === "order.paid" ? valorEsperado : null,
+      metodoPagamento: venda.metodoPagamento || "",
+      formaPagamento: venda.formaPagamento || "",
+      statusPagamento,
+      statusPagamentoLabel: statusPagamento,
+      pagamentoConfirmado: tipoEvento === "order.paid",
+      usuarioId: "sistema_pagarme",
+      usuarioNome: "Pagar.me",
+      criadoEm: agora,
+    };
+
+    transaction.set(vendaRef, atualizacao, { merge: true });
+    transaction.create(historicoVendaRef, historico);
+    transaction.create(historicoCentralRef, historico);
+    transaction.create(eventoRef, {
+      tipo: tipoEvento,
+      pedidoId: String(pedidoId),
+      vendaId,
+      processado: true,
+      ignorado: false,
+      criadoEm: agora,
+    });
+  });
+
+  return {
+    resultado,
+    vendaId,
+    statusPagamento: tipoEvento === "order.paid"
+      ? "Pago"
+      : tipoEvento === "order.payment_failed"
+        ? "Pagamento recusado"
+        : "Cancelado",
+    pagamentoConfirmado: tipoEvento === "order.paid" && resultado === "processado",
+  };
+}
+
+
 // =====================================================
 // RECEBER WEBHOOK
 // =====================================================
@@ -468,6 +641,29 @@ async function receberWebhook(req, res) {
         sucesso: false,
         mensagem:
           "O status real do pedido ainda não corresponde ao evento recebido.",
+      });
+    }
+
+
+    // Vendas de consultas possuem coleção e histórico próprios.
+    if (String(pedido.metadata?.tipoVenda || "").toLowerCase() === "consultas") {
+      const resultadoConsultas = await processarWebhookVendaConsulta({
+        pedido,
+        pedidoId,
+        tipoEvento,
+        evento,
+        statusPedido,
+      });
+
+      return res.status(200).json({
+        sucesso: true,
+        mensagem: resultadoConsultas.resultado === "duplicado"
+          ? "Evento de consultas já processado anteriormente."
+          : resultadoConsultas.resultado === "ignorado_pagamento_confirmado"
+            ? "Evento ignorado porque o pagamento da consulta já estava confirmado."
+            : "Pagamento de consulta sincronizado.",
+        ...resultadoConsultas,
+        pedidoId: String(pedidoId),
       });
     }
 

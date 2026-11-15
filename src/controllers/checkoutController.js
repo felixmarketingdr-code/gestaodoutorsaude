@@ -2176,10 +2176,197 @@ async function criarCheckoutExame(req, res) {
 
 }
 
+
+
+// =====================================================
+// CHECKOUT DE VENDAS DE CONSULTAS
+// Usa o valor persistido em vendasConsultas/{vendaId}.
+// O valor enviado pelo navegador nunca é usado como fonte de cobrança.
+// =====================================================
+
+async function criarCheckoutConsulta(req, res) {
+  try {
+    const uid = req.usuario?.uid;
+    if (!uid) {
+      return res.status(401).json({
+        sucesso: false,
+        ok: false,
+        mensagem: "Usuário não autenticado.",
+      });
+    }
+
+    const body = req.body || {};
+    const vendaId = String(body.vendaId || "").trim();
+    const metodoPagamento = normalizarMetodoPagamento(body.metodoPagamento);
+    const cardToken = body.cardToken;
+
+    if (!vendaId || !METODOS_PAGAMENTO.includes(metodoPagamento)) {
+      return res.status(400).json({
+        sucesso: false,
+        ok: false,
+        mensagem: "Informe a venda de consulta e uma forma de pagamento válida.",
+      });
+    }
+
+    if (metodoPagamento === "credit_card" && (!cardToken || typeof cardToken !== "string")) {
+      return res.status(400).json({
+        sucesso: false,
+        ok: false,
+        mensagem: "Token do cartão não informado.",
+      });
+    }
+
+    const vendaRef = db.collection("vendasConsultas").doc(vendaId);
+    const vendaSnap = await vendaRef.get();
+
+    if (!vendaSnap.exists) {
+      return res.status(404).json({
+        sucesso: false,
+        ok: false,
+        mensagem: "Venda de consulta não encontrada.",
+      });
+    }
+
+    const venda = vendaSnap.data() || {};
+    const papel = extrairPapelUsuario(req);
+    const ehAdmin = ["admin", "administrador"].includes(papel);
+    const vendedorId = String(venda.vendedorId || "");
+
+    if (!ehAdmin && vendedorId && vendedorId !== String(uid)) {
+      return res.status(403).json({
+        sucesso: false,
+        ok: false,
+        mensagem: "Você não tem permissão para gerar pagamento desta consulta.",
+      });
+    }
+
+    if (venda.pagamentoConfirmado === true ||
+        String(venda.statusPagamento || "").trim().toLowerCase() === "pago") {
+      return res.status(409).json({
+        sucesso: false,
+        ok: false,
+        mensagem: "Esta consulta já consta como paga.",
+      });
+    }
+
+    const cliente = validarCliente(body.cliente || {});
+    const valorFinal = Number(venda.valorTotal ?? venda.valor);
+
+    if (!Number.isFinite(valorFinal) || valorFinal <= 0) {
+      return res.status(400).json({
+        sucesso: false,
+        ok: false,
+        mensagem: "O valor registrado para esta consulta é inválido.",
+      });
+    }
+
+    const enderecoPagarme = await carregarEnderecoCliente(
+      venda.clienteId,
+      body.billingAddress || body.enderecoCobranca || null
+    );
+
+    if ((metodoPagamento === "boleto" || metodoPagamento === "credit_card") && !enderecoPagarme) {
+      return res.status(400).json({
+        sucesso: false,
+        ok: false,
+        mensagem: "Para cartão ou boleto, informe o endereço de cobrança completo: rua, número, bairro, cidade, UF e CEP.",
+      });
+    }
+
+    const pagamento = montarPagamento({
+      metodoPagamento,
+      parcelas: Number(body.parcelas || 1),
+      cardToken,
+    });
+
+    const clinica = String(venda.clinicaNome || venda.clinica || "Clínica não informada");
+    const especialidade = String(venda.especialidade || "Consulta");
+    const descricao = `Consulta ${especialidade} - ${clinica}`.slice(0, 120);
+
+    const pedido = {
+      customer: montarClientePagarme(cliente, enderecoPagarme),
+      items: [{
+        amount: paraCentavos(valorFinal),
+        description: descricao,
+        quantity: 1,
+        code: `venda-consultas-${vendaId}`,
+      }],
+      payments: [pagamento],
+      metadata: {
+        tipoVenda: "consultas",
+        vendaId,
+        usuarioUid: uid,
+        clienteId: String(venda.clienteId || ""),
+        metodoPagamento,
+      },
+    };
+
+    const pedidoResposta = await pagarmeService.criarPedido(pedido);
+    if (!pedidoResposta?.id) {
+      throw new Error("A Pagar.me não retornou o identificador do pedido.");
+    }
+
+    const dadosPagamento = extrairDadosPagamento(pedidoResposta);
+    const agora = FieldValue.serverTimestamp();
+
+    await vendaRef.set({
+      metodoPagamento,
+      formaPagamento: metodoPagamento === "credit_card"
+        ? "Cartão de crédito"
+        : metodoPagamento === "boleto" ? "Boleto" : "PIX",
+      valorCobrado: valorFinal,
+      pagarmeOrderId: dadosPagamento.orderId,
+      pagarmeChargeId: dadosPagamento.chargeId,
+      pagarmeStatus: dadosPagamento.status || "pending",
+      statusPagamento: "Aguardando pagamento",
+      statusPagamentoLabel: "Aguardando pagamento",
+      pagamentoConfirmado: false,
+      qrCode: dadosPagamento.qrCode || null,
+      qrCodeUrl: dadosPagamento.qrCodeUrl || null,
+      pixExpiraEm: dadosPagamento.pixExpiraEm || null,
+      boletoUrl: dadosPagamento.boletoUrl || null,
+      boletoLinha: dadosPagamento.boletoLinha || null,
+      checkoutStatus: "aguardando_pagamento",
+      checkoutIniciadoEm: agora,
+      atualizadoEm: agora,
+    }, { merge: true });
+
+    return res.status(201).json({
+      sucesso: true,
+      ok: true,
+      mensagem: "Cobrança da consulta criada. Aguardando confirmação do pagamento.",
+      vendaId,
+      pedidoId: dadosPagamento.orderId,
+      cobrancaId: dadosPagamento.chargeId,
+      valorTotal: valorFinal,
+      statusPagamento: "Aguardando pagamento",
+      qr_code: dadosPagamento.qrCode,
+      qr_code_url: dadosPagamento.qrCodeUrl,
+      pix_expira_em: dadosPagamento.pixExpiraEm,
+      boleto_url: dadosPagamento.boletoUrl,
+      boleto_linha: dadosPagamento.boletoLinha,
+    });
+  } catch (error) {
+    console.error("Erro ao criar checkout de consultas:", {
+      mensagem: error.message,
+      status: error.status || null,
+      detalhes: error.detalhes || null,
+    });
+    return res.status(error.status || 500).json({
+      sucesso: false,
+      ok: false,
+      mensagem: error.message || "Não foi possível iniciar o checkout da consulta.",
+      detalhes: error.detalhes || undefined,
+    });
+  }
+}
+
+
 module.exports = {
 
   criarCheckout,
 
   criarCheckoutExame,
+  criarCheckoutConsulta,
 
 };
