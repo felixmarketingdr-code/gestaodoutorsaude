@@ -1,0 +1,682 @@
+
+/* ==========================================
+   DOUTOR DE TODOS
+   VENDAS CANCELADAS
+   DESIGN ADMINISTRATIVO
+========================================== */
+
+.vc-page {
+  width: 100%;
+  min-height: 100%;
+  padding: 28px 30px 35px;
+  box-sizing: border-box;
+  background: #f3f6fa;
+  color: #24384b;
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+  font-size: 14px;
+}
+
+.vc-page *,
+.vc-page *::before,
+.vc-page *::after {
+  box-sizing: border-box;
+}
+
+/* ==========================================
+   CABEÇALHO
+========================================== */
+
+.vc-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 25px;
+}
+
+.vc-header > div {
+  min-width: 0;
+}
+
+.vc-kicker {
+  display: block;
+  margin-bottom: 8px;
+  color: #71839a;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1.3px;
+  text-transform: uppercase;
+}
+
+.vc-header h1 {
+  margin: 0;
+  color: #20394f;
+  font-size: 27px;
+  font-weight: 750;
+  letter-spacing: -0.6px;
+  line-height: 1.25;
+}
+
+.vc-header p {
+  margin: 8px 0 10px;
+  color: #748397;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.vc-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: center;
+  color: #8795a7;
+  font-size: 12px;
+}
+
+.vc-breadcrumb span {
+  color: #b3bfcc;
+}
+
+.vc-breadcrumb strong {
+  color: #28465f;
+  font-weight: 700;
+}
+
+/* BOTÕES */
+
+.vc-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 42px;
+  padding: 0 17px;
+  border: 1px solid #203f59;
+  border-radius: 8px;
+  background: #203f59;
+  color: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background .2s, transform .2s, box-shadow .2s;
+}
+
+.vc-button:hover:not(:disabled) {
+  background: #2c5675;
+  box-shadow: 0 4px 12px rgba(32, 63, 89, .15);
+  transform: translateY(-1px);
+}
+
+.vc-button:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+.vc-button-light {
+  min-width: 112px;
+}
+
+/* ==========================================
+   ANIMAÇÃO DE ATUALIZAÇÃO
+========================================== */
+
+.vc-spin {
+  animation: vc-rotacao 1s linear infinite;
+}
+
+@keyframes vc-rotacao {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ==========================================
+   AVISOS
+========================================== */
+
+.vc-notice,
+.vc-error {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 14px 16px;
+  margin-bottom: 18px;
+  border-radius: 9px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.vc-notice {
+  border: 1px solid #d8e6f3;
+  background: #edf5fc;
+  color: #315b7b;
+}
+
+.vc-error {
+  border: 1px solid #f3d0d0;
+  background: #fff1f1;
+  color: #a32c36;
+}
+
+/* ==========================================
+   INDICADORES
+========================================== */
+
+.vc-stats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 23px;
+}
+
+.vc-stats article {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  min-height: 112px;
+  padding: 19px 20px;
+  overflow: hidden;
+  border: 1px solid #e3eaf1;
+  border-radius: 11px;
+  background: #fff;
+  box-shadow: 0 2px 7px rgba(27, 54, 80, .035);
+  transition: transform .2s, box-shadow .2s;
+}
+
+.vc-stats article:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(27, 54, 80, .07);
+}
+
+.vc-stats article span {
+  max-width: 85%;
+  color: #75869a;
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1.4;
+}
+
+.vc-stats article strong {
+  display: block;
+  margin-top: 12px;
+  color: #213d55;
+  font-size: 25px;
+  font-weight: 750;
+  letter-spacing: -.5px;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+
+.vc-stats article svg {
+  position: absolute;
+  top: 19px;
+  right: 18px;
+  width: 21px;
+  height: 21px;
+  color: #8297ad;
+  stroke-width: 1.8;
+}
+
+.vc-stats article:first-child svg {
+  color: #d46b70;
+}
+
+.vc-stats article:last-child strong {
+  font-size: 21px;
+}
+
+/* ==========================================
+   PAINEL DE FILTROS
+========================================== */
+
+.vc-panel {
+  padding: 20px 22px;
+  margin-bottom: 20px;
+  border: 1px solid #e2e9f0;
+  border-radius: 11px;
+  background: #fff;
+  box-shadow: 0 2px 7px rgba(27, 54, 80, .025);
+}
+
+.vc-filter-toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0 16px;
+  border: 0;
+  border-bottom: 1px solid #edf1f5;
+  background: transparent;
+  color: #29465e;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.vc-filter-toggle > span {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.vc-filter-toggle > span:last-child {
+  color: #8090a2;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.vc-filter-toggle svg {
+  width: 17px;
+  height: 17px;
+  color: #52728f;
+}
+
+/* ==========================================
+   CAMPOS DE FILTRO
+========================================== */
+
+.vc-filters {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(130px, 1fr));
+  gap: 16px;
+  align-items: end;
+  padding-top: 19px;
+}
+
+.vc-filters label {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+  color: #53677d;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.vc-filters input,
+.vc-filters select {
+  width: 100%;
+  height: 42px;
+  min-width: 0;
+  padding: 0 12px;
+  border: 1px solid #dce5ed;
+  border-radius: 7px;
+  outline: none;
+  background: #fff;
+  color: #30485e;
+  font-family: inherit;
+  font-size: 13px;
+  transition: border .2s, box-shadow .2s;
+}
+
+.vc-filters input:focus,
+.vc-filters select:focus {
+  border-color: #557e9f;
+  box-shadow: 0 0 0 3px rgba(72, 120, 158, .10);
+}
+
+.vc-filters select {
+  cursor: pointer;
+}
+
+.vc-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 42px;
+  padding: 0 14px;
+  border: 1px solid #dce5ed;
+  border-radius: 7px;
+  background: #fff;
+  color: #61768b;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all .2s;
+}
+
+.vc-clear:hover {
+  border-color: #b9c9d8;
+  background: #f4f7fa;
+  color: #29465e;
+}
+
+/* ==========================================
+   PAINEL DA LISTAGEM
+========================================== */
+
+.vc-list-panel {
+  min-width: 0;
+  padding: 20px 22px;
+  border: 1px solid #e2e9f0;
+  border-radius: 11px;
+  background: #fff;
+  box-shadow: 0 2px 7px rgba(27, 54, 80, .025);
+}
+
+/* ==========================================
+   BARRA DE PESQUISA
+========================================== */
+
+.vc-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 19px;
+}
+
+.vc-search {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 200px;
+  align-items: center;
+}
+
+.vc-search svg {
+  position: absolute;
+  left: 13px;
+  width: 17px;
+  height: 17px;
+  color: #8495a7;
+  pointer-events: none;
+}
+
+.vc-search input {
+  width: 100%;
+  height: 44px;
+  padding: 0 14px 0 41px;
+  border: 1px solid #dce5ed;
+  border-radius: 8px;
+  outline: none;
+  background: #fafbfd;
+  color: #30485e;
+  font-family: inherit;
+  font-size: 13px;
+  transition: all .2s;
+}
+
+.vc-search input::placeholder {
+  color: #9aa8b6;
+}
+
+.vc-search input:focus {
+  border-color: #557e9f;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(72, 120, 158, .10);
+}
+
+.vc-toolbar-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 14px;
+}
+
+.vc-toolbar-actions > span {
+  color: #8493a3;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* ==========================================
+   TABELA
+========================================== */
+
+.vc-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid #e8edf2;
+  border-radius: 9px;
+}
+
+.vc-table {
+  width: 100%;
+  min-width: 1050px;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+}
+
+.vc-table th {
+  padding: 15px 13px;
+  border-bottom: 1px solid #e5ebf1;
+  background: #f7f9fb;
+  color: #65788d;
+  font-size: 11px;
+  font-weight: 750;
+  text-align: left;
+  text-transform: uppercase;
+  letter-spacing: .35px;
+  white-space: nowrap;
+}
+
+.vc-table td {
+  padding: 15px 13px;
+  border-bottom: 1px solid #edf1f5;
+  background: #fff;
+  color: #52677b;
+  font-size: 13px;
+  vertical-align: middle;
+}
+
+.vc-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.vc-table tbody tr {
+  transition: background .15s;
+}
+
+.vc-table tbody tr:hover td {
+  background: #f8fafc;
+}
+
+.vc-table td strong {
+  display: block;
+  color: #29445c;
+  font-weight: 650;
+}
+
+.vc-table td small {
+  display: block;
+  margin-top: 5px;
+  color: #94a2b1;
+  font-size: 11px;
+}
+
+.vc-table td code {
+  color: #6e8194;
+  font-size: 11px;
+}
+
+/* ==========================================
+   TIPOS DE VENDA
+========================================== */
+
+.vc-type {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #edf3f8;
+  color: #42627e;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.vc-type-carteirinha {
+  background: #eaf2fb;
+  color: #41688e;
+}
+
+.vc-type-exame {
+  background: #edf5f3;
+  color: #407c6b;
+}
+
+.vc-type-consulta {
+  background: #f2effb;
+  color: #75619d;
+}
+
+/* ==========================================
+   STATUS DE CANCELAMENTO
+========================================== */
+
+.vc-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px;
+  border: 1px solid #f2d6d6;
+  border-radius: 20px;
+  background: #fff0f0;
+  color: #b64f55;
+  font-size: 11px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+/* ==========================================
+   ESTADO VAZIO
+========================================== */
+
+.vc-empty {
+  display: flex;
+  min-height: 260px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 35px 20px;
+  color: #8998a8;
+  text-align: center;
+}
+
+.vc-empty > svg {
+  width: 43px;
+  height: 43px;
+  margin-bottom: 4px;
+  color: #9babbc;
+  stroke-width: 1.5;
+}
+
+.vc-empty strong {
+  color: #435c73;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.vc-empty span {
+  max-width: 500px;
+  color: #8998a8;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* ==========================================
+   RODAPÉ
+========================================== */
+
+.vc-footer {
+  padding-top: 17px;
+  margin-top: 18px;
+  border-top: 1px solid #edf1f5;
+  color: #8997a6;
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+/* ==========================================
+   RESPONSIVIDADE
+========================================== */
+
+@media (max-width: 1250px) {
+  .vc-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .vc-filters {
+    grid-template-columns: repeat(3, minmax(130px, 1fr));
+  }
+}
+
+@media (max-width: 850px) {
+  .vc-page {
+    padding: 20px;
+  }
+
+  .vc-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .vc-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .vc-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .vc-toolbar-actions {
+    justify-content: space-between;
+  }
+}
+
+@media (max-width: 550px) {
+  .vc-page {
+    padding: 14px;
+  }
+
+  .vc-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .vc-header h1 {
+    font-size: 23px;
+  }
+
+  .vc-stats {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .vc-stats article {
+    min-height: 90px;
+  }
+
+  .vc-filters {
+    grid-template-columns: 1fr;
+  }
+
+  .vc-panel,
+  .vc-list-panel {
+    padding: 15px;
+  }
+
+  .vc-toolbar-actions {
+    flex-wrap: wrap;
+  }
+
+  .vc-button {
+    min-height: 40px;
+  }
+
+  .vc-empty {
+    min-height: 220px;
+  }
+}

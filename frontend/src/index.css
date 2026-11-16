@@ -1,0 +1,338 @@
+
+/* =========================================
+   GESTÃO DOUTOR SAÚDE - ESTILO GLOBAL
+========================================= */
+
+:root {
+  font-family: Arial, Helvetica, sans-serif;
+
+  color: #263445;
+  background: #f0f4f9;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  /* CORES PRINCIPAIS */
+  --primary: #123b68;
+  --primary-dark: #0b294a;
+  --primary-light: #e7eff8;
+  --accent: #1976d2;
+
+  /* FUNDOS */
+  --background: #f0f4f9;
+  --surface: #ffffff;
+  --sidebar: #2c4052;
+
+  /* TEXTOS */
+  --text: #263445;
+  --text-muted: #718096;
+  --text-light: #ffffff;
+
+  /* BORDAS */
+  --border: #dce4ed;
+
+  /* DIMENSÕES */
+  --sidebar-width: 250px;
+  --sidebar-collapsed-width: 70px;
+  --topbar-height: 42px;
+}
+
+/* =========================================
+   RESET
+========================================= */
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  width: 100%;
+  min-width: 320px;
+  min-height: 100%;
+  scroll-behavior: smooth;
+}
+
+body {
+  width: 100%;
+  min-width: 320px;
+  min-height: 100vh;
+  font-family: Arial, Helvetica, sans-serif;
+  background: var(--background);
+  color: var(--text);
+  overflow-x: hidden;
+}
+
+#root {
+  display: block;
+  width: 100%;
+  min-width: 320px;
+  max-width: none;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+  text-align: left;
+}
+
+/* =========================================
+   ELEMENTOS GERAIS
+========================================= */
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+input,
+select,
+textarea {
+  max-width: 100%;
+}
+
+a {
+  color: var(--primary);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--accent);
+}
+
+img {
+  max-width: 100%;
+  height: auto;
+}
+
+::selection {
+  background: #c8dcf2;
+  color: var(--primary-dark);
+}
+
+/* =========================================
+   ESTRUTURA DO SISTEMA
+========================================= */
+
+.admin-container {
+  display: flex;
+  width: 100%;
+  min-height: 100vh;
+  background: var(--background);
+}
+
+/* ÁREA PRINCIPAL */
+
+.admin-main {
+  flex: 1;
+  width: calc(100% - var(--sidebar-width));
+  min-width: 0;
+  min-height: 100vh;
+  margin-left: var(--sidebar-width);
+  background: var(--background);
+  transition: margin-left 0.25s ease;
+}
+
+.admin-main.menu-recolhido {
+  width: calc(100% - var(--sidebar-collapsed-width));
+  margin-left: var(--sidebar-collapsed-width);
+}
+
+/* =========================================
+   BARRA SUPERIOR
+========================================= */
+
+.admin-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  width: 100%;
+  height: var(--topbar-height);
+  min-height: var(--topbar-height);
+
+  padding: 0 15px;
+
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+
+  color: #526477;
+  font-size: 12px;
+}
+
+.admin-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.admin-topbar-right button {
+  border: none;
+  background: transparent;
+  color: #526477;
+  font-size: 12px;
+}
+
+/* =========================================
+   CONTEÚDO DAS PÁGINAS
+========================================= */
+
+.admin-content {
+  width: 100%;
+  min-width: 0;
+  min-height: calc(100vh - var(--topbar-height));
+  padding: 25px 20px;
+  background: var(--background);
+}
+
+.admin-content h1 {
+  margin-bottom: 12px;
+  color: #49647f;
+  font-size: 25px;
+  font-weight: 400;
+}
+
+.admin-content h2 {
+  margin-bottom: 10px;
+  color: var(--primary);
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.admin-content p {
+  margin-bottom: 10px;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* =========================================
+   BOTÕES
+========================================= */
+
+.voltar-painel {
+  padding: 10px 16px;
+  border: none;
+  border-radius: 4px;
+  background: #304960;
+  color: #ffffff;
+}
+
+.voltar-painel:hover {
+  background: var(--primary);
+}
+
+/* =========================================
+   FORMULÁRIOS
+========================================= */
+
+input,
+select,
+textarea {
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  outline: none;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.1);
+}
+
+/* =========================================
+   TABELAS
+========================================= */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+th {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+/* =========================================
+   ROLAGEM
+========================================= */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #aebdce transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #aebdce;
+  border-radius: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* =========================================
+   RESPONSIVIDADE
+========================================= */
+
+@media (max-width: 768px) {
+  .admin-main,
+  .admin-main.menu-recolhido {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .admin-content {
+    padding: 18px 12px;
+  }
+
+  .admin-content h1 {
+    font-size: 21px;
+  }
+
+  .admin-topbar {
+    padding: 0 10px;
+  }
+}
+
+@media (max-width: 480px) {
+  .admin-content {
+    padding: 15px 10px;
+  }
+
+  .admin-content h1 {
+    font-size: 19px;
+  }
+}
