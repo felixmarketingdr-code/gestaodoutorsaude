@@ -2,12 +2,34 @@
 const { db } = require("../config/firebase");
 const { FieldValue } = require("firebase-admin/firestore");
 
+const COLECAO_PERFIS = "perfis";
+const COLECAO_USUARIOS = "usuarios";
+
 const ACOES_VALIDAS = [
   "visualizar",
   "incluir",
   "editar",
   "excluir",
 ];
+
+// ========================================
+// FUNÇÕES AUXILIARES
+// ========================================
+
+function responderErro(res, status, mensagem) {
+  return res.status(status).json({
+    sucesso: false,
+    mensagem,
+  });
+}
+
+function normalizarTexto(valor) {
+  return String(valor || "").trim();
+}
+
+function normalizarNome(valor) {
+  return normalizarTexto(valor).toLocaleLowerCase("pt-BR");
+}
 
 function normalizarPermissoes(permissoes) {
   const resultado = {};
@@ -21,8 +43,10 @@ function normalizarPermissoes(permissoes) {
   }
 
   for (const [modulo, acoes] of Object.entries(permissoes)) {
+    const nomeModulo = normalizarTexto(modulo);
+
     if (
-      !modulo ||
+      !nomeModulo ||
       !acoes ||
       typeof acoes !== "object" ||
       Array.isArray(acoes)
@@ -30,60 +54,157 @@ function normalizarPermissoes(permissoes) {
       continue;
     }
 
-    resultado[modulo] = {};
+    resultado[nomeModulo] = {};
 
     for (const acao of ACOES_VALIDAS) {
-      resultado[modulo][acao] = acoes[acao] === true;
+      resultado[nomeModulo][acao] = acoes[acao] === true;
     }
   }
 
   return resultado;
 }
 
-function responderErro(res, status, mensagem) {
-  return res.status(status).json({
-    sucesso: false,
-    mensagem,
+function formatarPerfil(documento) {
+  const dados = documento.data();
+
+  return {
+    id: documento.id,
+    nome: dados.nome || dados.perfilNome || "",
+    descricao: dados.descricao || "",
+    permissoes: normalizarPermissoes(dados.permissoes),
+    ativo: dados.ativo !== false,
+    criadoEm: dados.criadoEm || null,
+    atualizadoEm: dados.atualizadoEm || null,
+    criadoPor: dados.criadoPor || null,
+  };
+}
+
+function validarAdministrador(req, res) {
+  if (!req.usuario?.uid) {
+    responderErro(
+      res,
+      401,
+      "Usuário não autenticado."
+    );
+
+    return false;
+  }
+
+  return true;
+}
+
+// Verifica se já existe outro perfil com o mesmo nome.
+// Também considera documentos antigos sem nomeNormalizado.
+async function verificarNomeDuplicado(nome, idIgnorado = null) {
+  const snapshot = await db
+    .collection(COLECAO_PERFIS)
+    .get();
+
+  const nomeNormalizado = normalizarNome(nome);
+
+  return snapshot.docs.some((documento) => {
+    if (idIgnorado && documento.id === idIgnorado) {
+      return false;
+    }
+
+    const dados = documento.data();
+
+    const nomeExistente = normalizarNome(
+      dados.nome || dados.perfilNome || ""
+    );
+
+    const nomeSalvo = normalizarNome(
+      dados.nomeNormalizado || ""
+    );
+
+    return (
+      nomeExistente === nomeNormalizado ||
+      nomeSalvo === nomeNormalizado
+    );
   });
 }
 
+// Busca usuários vinculados ao perfil.
+// Considera tanto perfilId quanto perfil para compatibilidade.
+async function buscarUsuariosDoPerfil(perfilId) {
+  const [porPerfilId, porPerfil] = await Promise.all([
+    db
+      .collection(COLECAO_USUARIOS)
+      .where("perfilId", "==", perfilId)
+      .get(),
+
+    db
+      .collection(COLECAO_USUARIOS)
+      .where("perfil", "==", perfilId)
+      .get(),
+  ]);
+
+  const documentos = new Map();
+
+  porPerfilId.docs.forEach((doc) => {
+    documentos.set(doc.id, doc);
+  });
+
+  porPerfil.docs.forEach((doc) => {
+    documentos.set(doc.id, doc);
+  });
+
+  return Array.from(documentos.values());
+}
+
+// ========================================
 // GET /api/perfis
+// LISTAR PERFIS
+// ========================================
+
 async function listarPerfis(req, res) {
   try {
-    const snapshot = await db.collection("perfis").get();
+    if (!validarAdministrador(req, res)) {
+      return;
+    }
 
-    const perfis = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
+    const snapshot = await db
+      .collection(COLECAO_PERFIS)
+      .get();
 
-    perfis.sort((a, b) =>
-      String(a.nome || "").localeCompare(
-        String(b.nome || ""),
-        "pt-BR"
-      )
-    );
+    const perfis = snapshot.docs
+      .map(formatarPerfil)
+      .sort((a, b) =>
+        a.nome.localeCompare(b.nome, "pt-BR")
+      );
 
-    return res.json({
+    return res.status(200).json({
       sucesso: true,
+      total: perfis.length,
       perfis,
     });
   } catch (error) {
-    console.error("Erro ao listar perfis:", error);
+    console.error(
+      "Erro ao listar perfis:",
+      error
+    );
 
     return responderErro(
       res,
       500,
-      "Não foi possível listar os perfis."
+      "Não foi possível carregar os perfis."
     );
   }
 }
 
+// ========================================
 // POST /api/perfis
+// CRIAR PERFIL
+// ========================================
+
 async function criarPerfil(req, res) {
   try {
-    const nome = String(req.body.nome || "").trim();
-    const descricao = String(req.body.descricao || "").trim();
+    if (!validarAdministrador(req, res)) {
+      return;
+    }
+
+    const nome = normalizarTexto(req.body?.nome);
+    const descricao = normalizarTexto(req.body?.descricao);
 
     if (!nome) {
       return responderErro(
@@ -93,13 +214,17 @@ async function criarPerfil(req, res) {
       );
     }
 
-    const existente = await db
-      .collection("perfis")
-      .where("nomeNormalizado", "==", nome.toLowerCase())
-      .limit(1)
-      .get();
+    if (nome.length > 80) {
+      return responderErro(
+        res,
+        400,
+        "O nome do perfil deve ter no máximo 80 caracteres."
+      );
+    }
 
-    if (!existente.empty) {
+    const duplicado = await verificarNomeDuplicado(nome);
+
+    if (duplicado) {
       return responderErro(
         res,
         409,
@@ -108,12 +233,12 @@ async function criarPerfil(req, res) {
     }
 
     const permissoes = normalizarPermissoes(
-      req.body.permissoes
+      req.body?.permissoes
     );
 
-    const novoPerfil = {
+    const dadosPerfil = {
       nome,
-      nomeNormalizado: nome.toLowerCase(),
+      nomeNormalizado: normalizarNome(nome),
       descricao,
       permissoes,
       ativo: true,
@@ -123,19 +248,26 @@ async function criarPerfil(req, res) {
     };
 
     const referencia = await db
-      .collection("perfis")
-      .add(novoPerfil);
+      .collection(COLECAO_PERFIS)
+      .add(dadosPerfil);
 
     return res.status(201).json({
       sucesso: true,
       mensagem: "Perfil criado com sucesso.",
       perfil: {
         id: referencia.id,
-        ...novoPerfil,
+        nome,
+        nomeNormalizado: normalizarNome(nome),
+        descricao,
+        permissoes,
+        ativo: true,
       },
     });
   } catch (error) {
-    console.error("Erro ao criar perfil:", error);
+    console.error(
+      "Erro ao criar perfil:",
+      error
+    );
 
     return responderErro(
       res,
@@ -145,12 +277,20 @@ async function criarPerfil(req, res) {
   }
 }
 
+// ========================================
 // PUT /api/perfis/:id
+// EDITAR PERFIL
+// ========================================
+
 async function editarPerfil(req, res) {
   try {
-    const id = String(req.params.id || "").trim();
-    const nome = String(req.body.nome || "").trim();
-    const descricao = String(req.body.descricao || "").trim();
+    if (!validarAdministrador(req, res)) {
+      return;
+    }
+
+    const id = normalizarTexto(req.params.id);
+    const nome = normalizarTexto(req.body?.nome);
+    const descricao = normalizarTexto(req.body?.descricao);
 
     if (!id || !nome) {
       return responderErro(
@@ -160,7 +300,18 @@ async function editarPerfil(req, res) {
       );
     }
 
-    const referencia = db.collection("perfis").doc(id);
+    if (nome.length > 80) {
+      return responderErro(
+        res,
+        400,
+        "O nome do perfil deve ter no máximo 80 caracteres."
+      );
+    }
+
+    const referencia = db
+      .collection(COLECAO_PERFIS)
+      .doc(id);
+
     const documento = await referencia.get();
 
     if (!documento.exists) {
@@ -171,17 +322,12 @@ async function editarPerfil(req, res) {
       );
     }
 
-    const existente = await db
-      .collection("perfis")
-      .where("nomeNormalizado", "==", nome.toLowerCase())
-      .limit(2)
-      .get();
-
-    const conflito = existente.docs.some(
-      (doc) => doc.id !== id
+    const duplicado = await verificarNomeDuplicado(
+      nome,
+      id
     );
 
-    if (conflito) {
+    if (duplicado) {
       return responderErro(
         res,
         409,
@@ -190,43 +336,60 @@ async function editarPerfil(req, res) {
     }
 
     const permissoes = normalizarPermissoes(
-      req.body.permissoes
+      req.body?.permissoes
     );
 
+    // Atualiza o perfil sem modificar seu ID.
     await referencia.update({
       nome,
-      nomeNormalizado: nome.toLowerCase(),
+      nomeNormalizado: normalizarNome(nome),
       descricao,
       permissoes,
       atualizadoEm: FieldValue.serverTimestamp(),
       atualizadoPor: req.usuario.uid,
     });
 
-    // Atualiza o nome do perfil nos cadastros dos usuários.
-    const usuarios = await db
-      .collection("usuarios")
-      .where("perfilId", "==", id)
-      .get();
+    // Atualiza o nome nos usuários vinculados.
+    const usuarios = await buscarUsuariosDoPerfil(id);
 
-    const lote = db.batch();
+    // O Firestore permite no máximo 500 operações por lote.
+    for (let inicio = 0; inicio < usuarios.length; inicio += 450) {
+      const lote = db.batch();
 
-    usuarios.docs.forEach((doc) => {
-      lote.update(doc.ref, {
-        perfilNome: nome,
-        atualizadoEm: FieldValue.serverTimestamp(),
+      const grupo = usuarios.slice(
+        inicio,
+        inicio + 450
+      );
+
+      grupo.forEach((usuarioDoc) => {
+        lote.update(usuarioDoc.ref, {
+          perfilId: id,
+          perfil: id,
+          perfilNome: nome,
+          atualizadoEm: FieldValue.serverTimestamp(),
+        });
       });
-    });
 
-    if (!usuarios.empty) {
       await lote.commit();
     }
 
-    return res.json({
+    return res.status(200).json({
       sucesso: true,
       mensagem: "Perfil atualizado com sucesso.",
+      perfil: {
+        id,
+        nome,
+        nomeNormalizado: normalizarNome(nome),
+        descricao,
+        permissoes,
+      },
+      usuariosAtualizados: usuarios.length,
     });
   } catch (error) {
-    console.error("Erro ao editar perfil:", error);
+    console.error(
+      "Erro ao editar perfil:",
+      error
+    );
 
     return responderErro(
       res,
@@ -236,10 +399,18 @@ async function editarPerfil(req, res) {
   }
 }
 
+// ========================================
 // DELETE /api/perfis/:id
+// EXCLUIR PERFIL
+// ========================================
+
 async function excluirPerfil(req, res) {
   try {
-    const id = String(req.params.id || "").trim();
+    if (!validarAdministrador(req, res)) {
+      return;
+    }
+
+    const id = normalizarTexto(req.params.id);
 
     if (!id) {
       return responderErro(
@@ -249,7 +420,10 @@ async function excluirPerfil(req, res) {
       );
     }
 
-    const referencia = db.collection("perfis").doc(id);
+    const referencia = db
+      .collection(COLECAO_PERFIS)
+      .doc(id);
+
     const documento = await referencia.get();
 
     if (!documento.exists) {
@@ -260,28 +434,27 @@ async function excluirPerfil(req, res) {
       );
     }
 
-    const usuarios = await db
-      .collection("usuarios")
-      .where("perfilId", "==", id)
-      .limit(1)
-      .get();
+    const usuarios = await buscarUsuariosDoPerfil(id);
 
-    if (!usuarios.empty) {
+    if (usuarios.length > 0) {
       return responderErro(
         res,
         409,
-        "Este perfil está atribuído a usuários. Altere o perfil desses usuários antes de excluí-lo."
+        `Este perfil está atribuído a ${usuarios.length} usuário(s). Altere o perfil desses usuários antes de excluí-lo.`
       );
     }
 
     await referencia.delete();
 
-    return res.json({
+    return res.status(200).json({
       sucesso: true,
       mensagem: "Perfil excluído com sucesso.",
     });
   } catch (error) {
-    console.error("Erro ao excluir perfil:", error);
+    console.error(
+      "Erro ao excluir perfil:",
+      error
+    );
 
     return responderErro(
       res,
@@ -290,6 +463,10 @@ async function excluirPerfil(req, res) {
     );
   }
 }
+
+// ========================================
+// EXPORTAÇÕES
+// ========================================
 
 module.exports = {
   listarPerfis,
