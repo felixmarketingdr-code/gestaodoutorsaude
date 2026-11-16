@@ -1,7 +1,6 @@
 
 const { auth, db } = require("../config/firebase");
 const { FieldValue } = require("firebase-admin/firestore");
-const crypto = require("crypto");
 
 function responderErro(res, status, mensagem) {
   return res.status(status).json({
@@ -82,9 +81,12 @@ async function criarUsuario(req, res) {
     const nome = `${primeiroNome} ${segundoNome}`.trim();
     const email = normalizarTexto(req.body.email).toLowerCase();
     const usuario = normalizarTexto(req.body.usuario);
+    const senha = String(req.body.senha || "");
+
     const perfilId = normalizarTexto(
       req.body.perfilId || req.body.perfil
     );
+
     const ativo = req.body.ativo !== false;
 
     if (
@@ -92,7 +94,8 @@ async function criarUsuario(req, res) {
       !segundoNome ||
       !email ||
       !usuario ||
-      !perfilId
+      !perfilId ||
+      !senha
     ) {
       return responderErro(
         res,
@@ -103,6 +106,14 @@ async function criarUsuario(req, res) {
 
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return responderErro(res, 400, "E-mail inválido.");
+    }
+
+    if (senha.length < 6) {
+      return responderErro(
+        res,
+        400,
+        "A senha deve ter pelo menos 6 caracteres."
+      );
     }
 
     const perfil = await buscarPerfilAtivo(perfilId);
@@ -129,12 +140,11 @@ async function criarUsuario(req, res) {
       );
     }
 
-    // Cria uma senha aleatória que não será devolvida ao navegador.
-    const senhaTemporaria = crypto.randomBytes(32).toString("hex");
-
+    // Cria a conta no Firebase Authentication
+    // utilizando a senha definida no formulário.
     usuarioAuthCriado = await auth.createUser({
       email,
-      password: senhaTemporaria,
+      password: senha,
       displayName: nome,
       disabled: !ativo,
       emailVerified: false,
@@ -162,26 +172,12 @@ async function criarUsuario(req, res) {
       ultimoAcesso: null,
     };
 
+    // Salva os dados do usuário no Firestore.
     await db.collection("usuarios").doc(uid).set(dadosUsuario);
-
-    // Gera o link de definição/redefinição de senha.
-    // O envio por e-mail depende de um serviço de e-mail configurado.
-    let conviteLink = null;
-
-    try {
-      conviteLink = await auth.generatePasswordResetLink(email);
-    } catch (erroLink) {
-      console.error(
-        "Não foi possível gerar o link de convite:",
-        erroLink.message
-      );
-    }
 
     return res.status(201).json({
       sucesso: true,
-      mensagem: conviteLink
-        ? "Usuário criado. O link de acesso foi gerado."
-        : "Usuário criado, mas não foi possível gerar o link de acesso.",
+      mensagem: "Usuário criado com sucesso.",
       usuario: {
         uid,
         nome,
@@ -191,12 +187,12 @@ async function criarUsuario(req, res) {
         perfilNome: perfil.nome || "",
         ativo,
       },
-      conviteLink,
     });
+
   } catch (error) {
     console.error("Erro ao criar usuário:", error);
 
-    // Se o cadastro no Firestore falhar depois da criação no Auth,
+    // Se o Firestore falhar depois da criação no Auth,
     // remove a conta criada para evitar cadastro incompleto.
     if (usuarioAuthCriado?.uid) {
       try {
@@ -214,6 +210,14 @@ async function criarUsuario(req, res) {
         res,
         409,
         "Já existe uma conta com este e-mail."
+      );
+    }
+
+    if (error.code === "auth/invalid-password") {
+      return responderErro(
+        res,
+        400,
+        "A senha informada não é válida."
       );
     }
 
@@ -268,12 +272,22 @@ async function editarUsuario(req, res) {
       atual.perfil
     );
 
-    if (!primeiroNome || !segundoNome || !email || !usuario || !perfilId) {
+    if (
+      !primeiroNome ||
+      !segundoNome ||
+      !email ||
+      !usuario ||
+      !perfilId
+    ) {
       return responderErro(
         res,
         400,
         "Preencha todos os campos obrigatórios."
       );
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return responderErro(res, 400, "E-mail inválido.");
     }
 
     const perfil = await buscarPerfilAtivo(perfilId);
@@ -308,6 +322,8 @@ async function editarUsuario(req, res) {
       ? atual.ativo !== false
       : req.body.ativo === true;
 
+    // Atualiza os dados no Firebase Authentication.
+    // Não altera a senha do usuário.
     await auth.updateUser(uid, {
       email,
       displayName: nome,
@@ -340,6 +356,7 @@ async function editarUsuario(req, res) {
         ...dadosAtualizados,
       },
     });
+
   } catch (error) {
     console.error("Erro ao editar usuário:", error);
 
@@ -416,7 +433,7 @@ async function alterarStatusUsuario(req, res) {
       atualizadoPor: req.usuario.uid,
     });
 
-    // Revoga sessões existentes. O bloqueio no Auth impede novos logins.
+    // Revoga sessões existentes ao bloquear o usuário.
     if (!ativo) {
       await auth.revokeRefreshTokens(uid);
     }
@@ -427,6 +444,7 @@ async function alterarStatusUsuario(req, res) {
         ? "Usuário reativado com sucesso."
         : "Usuário bloqueado com sucesso.",
     });
+
   } catch (error) {
     console.error("Erro ao alterar status do usuário:", error);
 
