@@ -3809,7 +3809,4 @@ export default function Checkout({
 
 
   );
-
-
-
 }
