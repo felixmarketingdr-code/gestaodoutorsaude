@@ -6,7 +6,10 @@ const cors = require("cors");
 const helmet = require("helmet");
 const { rateLimit } = require("express-rate-limit");
 
-// Rotas
+// ========================================
+// ROTAS
+// ========================================
+
 const checkoutRoutes = require("./src/routes/checkoutRoutes");
 const webhookRoutes = require("./src/routes/webhookRoutes");
 const usuariosRoutes = require("./src/routes/usuariosRoutes");
@@ -17,26 +20,73 @@ const app = express();
 const PORT = Number(process.env.PORT || 3001);
 
 // ========================================
+// ORIGENS AUTORIZADAS
+// ========================================
+
+const origensPermitidas = [
+  "http://localhost:5173",
+  "http://localhost:5174",
+
+  ...(process.env.FRONTEND_URL || "")
+    .split(",")
+    .map((url) => url.trim())
+    .filter(Boolean),
+
+  ...(process.env.FRONTEND_URLS || "")
+    .split(",")
+    .map((url) => url.trim())
+    .filter(Boolean),
+];
+
+const origensUnicas = [...new Set(origensPermitidas)];
+
+console.log("Origens autorizadas pelo CORS:", origensUnicas);
+
+// ========================================
 // SEGURANÇA
 // ========================================
 
 app.use(helmet());
 
+// ========================================
+// CORS
+// ========================================
+
 app.use(
   cors({
     origin: (origin, callback) => {
-      const permitidas = [
-        process.env.FRONTEND_URL || "http://localhost:5173",
-      ];
-
-      if (!origin || permitidas.includes(origin)) {
+      // Permite requisições sem Origin, como verificações internas.
+      if (!origin) {
         return callback(null, true);
       }
 
-      return callback(new Error("Origem não autorizada pelo CORS."));
+      if (origensUnicas.includes(origin)) {
+        return callback(null, true);
+      }
+
+      console.error("Origem bloqueada pelo CORS:", origin);
+
+      return callback(
+        new Error("Origem não autorizada pelo CORS.")
+      );
     },
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+
+    methods: [
+      "GET",
+      "POST",
+      "PUT",
+      "PATCH",
+      "DELETE",
+      "OPTIONS",
+    ],
+
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "Accept",
+    ],
+
+    optionsSuccessStatus: 204,
   })
 );
 
@@ -75,11 +125,14 @@ app.use("/api/usuarios", usuariosRoutes);
 // Gerenciamento de perfis e permissões
 app.use("/api/perfis", perfisRoutes);
 
-// Verificação de funcionamento do backend
+// ========================================
+// VERIFICAÇÃO DE FUNCIONAMENTO
+// ========================================
+
 app.get("/api/health", (req, res) => {
   res.json({
     sucesso: true,
-    mensagem: "Backend Doutor de Todos funcionando.",
+    mensagem: "Backend Gestão Doutor Saúde Familiar funcionando.",
     ambiente: process.env.NODE_ENV || "development",
   });
 });
@@ -92,6 +145,8 @@ app.use((req, res) => {
   res.status(404).json({
     sucesso: false,
     mensagem: "Rota não encontrada.",
+    caminho: req.originalUrl,
+    metodo: req.method,
   });
 });
 
@@ -121,14 +176,14 @@ app.use((error, req, res, next) => {
 
 app.listen(PORT, () => {
   console.log("------------------------------------");
-  console.log("DOUTOR DE TODOS - BACKEND");
+  console.log("GESTÃO DOUTOR SAÚDE FAMILIAR");
   console.log("------------------------------------");
   console.log(`Servidor iniciado na porta ${PORT}`);
   console.log(`Ambiente: ${process.env.NODE_ENV || "development"}`);
-  console.log(`Health: http://localhost:${PORT}/api/health`);
-  console.log(`Checkout: http://localhost:${PORT}/api/checkout`);
-  console.log(`Webhook: /api/webhooks/pagarme`);
-  console.log(`Usuários: /api/usuarios`);
-  console.log(`Perfis: /api/perfis`);
+  console.log("Health: /api/health");
+  console.log("Checkout: /api/checkout");
+  console.log("Webhook: /api/webhooks/pagarme");
+  console.log("Usuários: /api/usuarios");
+  console.log("Perfis: /api/perfis");
   console.log("------------------------------------");
 });
