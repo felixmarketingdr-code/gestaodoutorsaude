@@ -409,7 +409,13 @@ export default function VendaCarteirinha({
 
         const clientesRef = collection(db, "clientes");
         const contratosRef = collection(db, "contratos");
-        const leadsRef = collection(db, "leads");
+
+        // A lista "Leads recebidos pelo site" será alimentada
+        // diretamente pelos contratos criados pelo site.
+        const contratosSiteRef = query(
+          contratosRef,
+          where("origem", "==", "site_doutor_de_todos")
+        );
 
         let clientesSnap;
         let contratosSnap;
@@ -422,7 +428,7 @@ export default function VendaCarteirinha({
           ]);
 
           try {
-            leadsSnap = await getDocs(leadsRef);
+            leadsSnap = await getDocs(contratosSiteRef);
           } catch (erroLeads) {
             console.warn(
               "Não foi possível consultar a coleção leads:",
@@ -465,42 +471,16 @@ export default function VendaCarteirinha({
 
           contratosSnap = contratosVendedor;
 
-          // Leads atribuídos ao vendedor são consultados separadamente.
+          // Busca diretamente os contratos cuja origem é o site.
+          // Não consulta a coleção "leads".
           try {
-            leadsSnap = await getDocs(leadsRef);
-          } catch {
-            const consultasLeads = await Promise.allSettled([
-              getDocs(
-                query(
-                  leadsRef,
-                  where("vendedorId", "==", usuario.uid)
-                )
-              ),
-              getDocs(
-                query(
-                  leadsRef,
-                  where("criadoPor", "==", usuario.uid)
-                )
-              ),
-              getDocs(
-                query(
-                  leadsRef,
-                  where("responsavelId", "==", usuario.uid)
-                )
-              ),
-            ]);
-
-            const porId = new Map();
-
-            consultasLeads.forEach((resultado) => {
-              if (resultado.status === "fulfilled") {
-                resultado.value.docs.forEach((item) =>
-                  porId.set(item.id, item)
-                );
-              }
-            });
-
-            leadsSnap = { docs: [...porId.values()] };
+            leadsSnap = await getDocs(contratosSiteRef);
+          } catch (erroContratosSite) {
+            console.warn(
+              "Não foi possível consultar contratos do site:",
+              erroContratosSite
+            );
+            leadsSnap = { docs: [] };
           }
         }
 
@@ -709,33 +689,32 @@ export default function VendaCarteirinha({
     const numeros = somenteNumeros(busca);
 
     return leads.filter((lead) => {
-      const jaConvertido =
-        Boolean(lead.clienteId) ||
-        Boolean(lead.contratoId) ||
-        [
-          "convertido",
-          "em_cadastramento",
-          "em cadastramento",
-          "aguardando_pagamento",
-          "aguardando pagamento",
-          "ativo",
-        ].includes(normalizarStatus(lead.status));
+      // Exibe os cadastros originados no site mesmo que já tenham
+      // cliente/contrato vinculado ou pagamento confirmado.
+      const ehCadastroDoSite =
+        lead.origem === "site_doutor_de_todos" ||
+        Boolean(lead.cadastroId) ||
+        Boolean(lead.dados?.plano);
 
-      if (jaConvertido) return false;
+      if (!ehCadastroDoSite) return false;
       if (!termo) return true;
 
       const nome = String(
-        lead.nome || lead.nomeCompleto || lead.name || ""
+        lead.nome || lead.nomeCompleto || lead.name ||
+        lead.dados?.nome || ""
       ).toLowerCase();
 
-      const email = String(lead.email || "").toLowerCase();
+      const email = String(
+        lead.email || lead.dados?.email || ""
+      ).toLowerCase();
 
       const telefone = somenteNumeros(
-        lead.telefone || lead.celular || lead.whatsapp
+        lead.telefone || lead.celular || lead.whatsapp ||
+        lead.dados?.telefone || lead.dados?.celular
       );
 
       const cpf = somenteNumeros(
-        lead.cpf || lead.documento
+        lead.cpf || lead.documento || lead.dados?.cpf
       );
 
       return (
@@ -767,7 +746,10 @@ export default function VendaCarteirinha({
 
     return {
       leads: leads.filter(
-        (lead) => !lead.clienteId && !lead.contratoId
+        (lead) =>
+          lead.origem === "site_doutor_de_todos" ||
+          Boolean(lead.cadastroId) ||
+          Boolean(lead.dados?.plano)
       ).length,
       oportunidades: clientes.filter(
         (cliente) => !cliente.contratoAtual
@@ -1606,20 +1588,41 @@ export default function VendaCarteirinha({
                 lead.nome ||
                 lead.nomeCompleto ||
                 lead.name ||
+                lead.dados?.nome ||
                 "Nome não informado";
 
               const telefone =
                 lead.telefone ||
                 lead.celular ||
                 lead.whatsapp ||
+                lead.dados?.telefone ||
+                lead.dados?.celular ||
                 "";
 
-              const email = lead.email || "";
+              const email = lead.email || lead.dados?.email || "";
 
               const cpf =
                 lead.cpf ||
                 lead.documento ||
+                lead.dados?.cpf ||
                 "";
+
+              const planoEscolhido = String(
+                lead.plano || lead.dados?.plano || ""
+              ).trim();
+
+              const pagamentoConfirmado =
+                normalizarStatus(
+                  lead.statusPagamento || lead.dados?.statusPagamento
+                ) === "pago";
+
+              const statusVenda = pagamentoConfirmado
+                ? "Pendente"
+                : "EM CADASTRAMENTO";
+
+              const pendenciaContrato = pagamentoConfirmado
+                ? "Falta Auditar"
+                : "Aguardando pagamento";
 
               return (
                 <article
@@ -1652,6 +1655,24 @@ export default function VendaCarteirinha({
                     {cpf && (
                       <small>CPF: {formatarCPF(cpf)}</small>
                     )}
+
+                    {planoEscolhido && (
+                      <small>
+                        Plano escolhido: {planoEscolhido.toUpperCase()}
+                      </small>
+                    )}
+
+                    <small>
+                      Status da venda: <strong>{statusVenda}</strong>
+                    </small>
+
+                    <small>
+                      Pendência de contrato: <strong>{pendenciaContrato}</strong>
+                    </small>
+
+                    <small>
+                      Pagamento: {pagamentoConfirmado ? "Confirmado" : "Aguardando pagamento"}
+                    </small>
 
                     {!telefone && !email && !cpf && (
                       <small>
