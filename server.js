@@ -6,7 +6,10 @@ const cors = require("cors");
 const helmet = require("helmet");
 const { rateLimit } = require("express-rate-limit");
 
-// Rotas
+// ========================================
+// ROTAS
+// ========================================
+
 const checkoutRoutes = require("./src/routes/checkoutRoutes");
 const webhookRoutes = require("./src/routes/webhookRoutes");
 const usuariosRoutes = require("./src/routes/usuariosRoutes");
@@ -17,28 +20,107 @@ const app = express();
 const PORT = Number(process.env.PORT || 3001);
 
 // ========================================
+// ORIGENS AUTORIZADAS
+// ========================================
+
+function separarOrigens(valor) {
+  return (valor || "")
+    .split(/[,\s]+/)
+    .map((url) => url.trim())
+    .filter(Boolean);
+}
+
+function normalizarOrigem(valor) {
+  try {
+    return new URL(valor).origin;
+  } catch {
+    console.warn("Origem inválida ignorada:", valor);
+    return null;
+  }
+}
+
+const origensConfiguradas = [
+  "http://localhost:5173",
+  "http://localhost:5174",
+
+  ...separarOrigens(process.env.FRONTEND_URL),
+  ...separarOrigens(process.env.FRONTEND_URLS),
+];
+
+const origensPermitidas = [
+  ...new Set(
+    origensConfiguradas
+      .map(normalizarOrigem)
+      .filter(Boolean)
+  ),
+];
+
+console.log("------------------------------------");
+console.log("ORIGENS AUTORIZADAS PELO CORS:");
+console.log(origensPermitidas);
+console.log("------------------------------------");
+
+// ========================================
+// CONFIGURAÇÃO DO CORS
+// ========================================
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Permite requisições sem Origin, como chamadas internas.
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    const origemNormalizada = normalizarOrigem(origin);
+
+    if (
+      origemNormalizada &&
+      origensPermitidas.includes(origemNormalizada)
+    ) {
+      return callback(null, true);
+    }
+
+    console.error("ORIGEM BLOQUEADA PELO CORS:", origin);
+
+    const erro = new Error("Origem não autorizada pelo CORS.");
+    erro.status = 403;
+
+    return callback(erro);
+  },
+
+  methods: [
+    "GET",
+    "POST",
+    "PUT",
+    "PATCH",
+    "DELETE",
+    "OPTIONS",
+  ],
+
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "Accept",
+  ],
+
+  optionsSuccessStatus: 204,
+};
+
+// ========================================
 // SEGURANÇA
 // ========================================
 
 app.use(helmet());
 
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      const permitidas = [
-        process.env.FRONTEND_URL || "http://localhost:5173",
-      ];
+// ========================================
+// CORS
+// ========================================
 
-      if (!origin || permitidas.includes(origin)) {
-        return callback(null, true);
-      }
+// Deve ficar antes do limitador e de todas as rotas.
+// O middleware cors responde automaticamente às requisições
+// OPTIONS de preflight do navegador.
 
-      return callback(new Error("Origem não autorizada pelo CORS."));
-    },
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-  })
-);
+app.use(cors(corsOptions));
 
 // ========================================
 // LIMITADOR DE REQUISIÇÕES
@@ -75,12 +157,16 @@ app.use("/api/usuarios", usuariosRoutes);
 // Gerenciamento de perfis e permissões
 app.use("/api/perfis", perfisRoutes);
 
-// Verificação de funcionamento do backend
+// ========================================
+// VERIFICAÇÃO DE FUNCIONAMENTO
+// ========================================
+
 app.get("/api/health", (req, res) => {
-  res.json({
+  res.status(200).json({
     sucesso: true,
-    mensagem: "Backend Doutor de Todos funcionando.",
+    mensagem: "Backend Gestão Doutor Saúde Familiar funcionando.",
     ambiente: process.env.NODE_ENV || "development",
+    data: new Date().toISOString(),
   });
 });
 
@@ -92,6 +178,8 @@ app.use((req, res) => {
   res.status(404).json({
     sucesso: false,
     mensagem: "Rota não encontrada.",
+    caminho: req.originalUrl,
+    metodo: req.method,
   });
 });
 
@@ -106,10 +194,12 @@ app.use((error, req, res, next) => {
     return next(error);
   }
 
-  res.status(error.status || 500).json({
+  const status = error.status || 500;
+
+  res.status(status).json({
     sucesso: false,
     mensagem:
-      error.status && error.status < 500
+      status < 500
         ? error.message
         : "Erro interno do servidor.",
   });
@@ -121,14 +211,16 @@ app.use((error, req, res, next) => {
 
 app.listen(PORT, () => {
   console.log("------------------------------------");
-  console.log("DOUTOR DE TODOS - BACKEND");
+  console.log("GESTÃO DOUTOR SAÚDE FAMILIAR");
   console.log("------------------------------------");
   console.log(`Servidor iniciado na porta ${PORT}`);
   console.log(`Ambiente: ${process.env.NODE_ENV || "development"}`);
-  console.log(`Health: http://localhost:${PORT}/api/health`);
-  console.log(`Checkout: http://localhost:${PORT}/api/checkout`);
-  console.log(`Webhook: /api/webhooks/pagarme`);
-  console.log(`Usuários: /api/usuarios`);
-  console.log(`Perfis: /api/perfis`);
+  console.log("Health: /api/health");
+  console.log("Checkout: /api/checkout");
+  console.log("Checkout exames: /api/checkout/exames");
+  console.log("Checkout consultas: /api/checkout/consultas");
+  console.log("Webhook: /api/webhooks/pagarme");
+  console.log("Usuários: /api/usuarios");
+  console.log("Perfis: /api/perfis");
   console.log("------------------------------------");
 });
