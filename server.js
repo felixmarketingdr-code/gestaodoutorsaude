@@ -20,27 +20,91 @@ const app = express();
 const PORT = Number(process.env.PORT || 3001);
 
 // ========================================
+// NORMALIZAÇÃO DAS ORIGENS
+// ========================================
+
+function normalizarOrigem(valor) {
+  try {
+    return new URL(valor.trim()).origin;
+  } catch {
+    console.warn("URL de frontend inválida ignorada:", valor);
+    return null;
+  }
+}
+
+// ========================================
 // ORIGENS AUTORIZADAS
 // ========================================
 
-const origensPermitidas = [
+const origensConfiguradas = [
   "http://localhost:5173",
   "http://localhost:5174",
 
   ...(process.env.FRONTEND_URL || "")
-    .split(",")
-    .map((url) => url.trim())
-    .filter(Boolean),
+    .split(","),
 
   ...(process.env.FRONTEND_URLS || "")
-    .split(",")
-    .map((url) => url.trim())
-    .filter(Boolean),
+    .split(","),
 ];
 
-const origensUnicas = [...new Set(origensPermitidas)];
+const origensPermitidas = [
+  ...new Set(
+    origensConfiguradas
+      .map((url) => normalizarOrigem(url))
+      .filter(Boolean)
+  ),
+];
 
-console.log("Origens autorizadas pelo CORS:", origensUnicas);
+console.log("------------------------------------");
+console.log("ORIGENS AUTORIZADAS PELO CORS:");
+console.log(origensPermitidas);
+console.log("------------------------------------");
+
+// ========================================
+// CONFIGURAÇÃO DO CORS
+// ========================================
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Permite chamadas internas e ferramentas sem Origin.
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    const origemNormalizada = normalizarOrigem(origin);
+
+    if (
+      origemNormalizada &&
+      origensPermitidas.includes(origemNormalizada)
+    ) {
+      return callback(null, true);
+    }
+
+    console.error("ORIGEM BLOQUEADA PELO CORS:", origin);
+
+    const erro = new Error("Origem não autorizada pelo CORS.");
+    erro.status = 403;
+
+    return callback(erro);
+  },
+
+  methods: [
+    "GET",
+    "POST",
+    "PUT",
+    "PATCH",
+    "DELETE",
+    "OPTIONS",
+  ],
+
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "Accept",
+  ],
+
+  optionsSuccessStatus: 204,
+};
 
 // ========================================
 // SEGURANÇA
@@ -52,43 +116,10 @@ app.use(helmet());
 // CORS
 // ========================================
 
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      // Permite requisições sem Origin, como verificações internas.
-      if (!origin) {
-        return callback(null, true);
-      }
+// O middleware também responde às requisições OPTIONS
+// utilizadas pelo navegador antes de determinadas chamadas.
 
-      if (origensUnicas.includes(origin)) {
-        return callback(null, true);
-      }
-
-      console.error("Origem bloqueada pelo CORS:", origin);
-
-      return callback(
-        new Error("Origem não autorizada pelo CORS.")
-      );
-    },
-
-    methods: [
-      "GET",
-      "POST",
-      "PUT",
-      "PATCH",
-      "DELETE",
-      "OPTIONS",
-    ],
-
-    allowedHeaders: [
-      "Content-Type",
-      "Authorization",
-      "Accept",
-    ],
-
-    optionsSuccessStatus: 204,
-  })
-);
+app.use(cors(corsOptions));
 
 // ========================================
 // LIMITADOR DE REQUISIÇÕES
@@ -130,10 +161,11 @@ app.use("/api/perfis", perfisRoutes);
 // ========================================
 
 app.get("/api/health", (req, res) => {
-  res.json({
+  res.status(200).json({
     sucesso: true,
     mensagem: "Backend Gestão Doutor Saúde Familiar funcionando.",
     ambiente: process.env.NODE_ENV || "development",
+    data: new Date().toISOString(),
   });
 });
 
@@ -161,10 +193,12 @@ app.use((error, req, res, next) => {
     return next(error);
   }
 
-  res.status(error.status || 500).json({
+  const status = error.status || 500;
+
+  res.status(status).json({
     sucesso: false,
     mensagem:
-      error.status && error.status < 500
+      status < 500
         ? error.message
         : "Erro interno do servidor.",
   });
@@ -182,6 +216,8 @@ app.listen(PORT, () => {
   console.log(`Ambiente: ${process.env.NODE_ENV || "development"}`);
   console.log("Health: /api/health");
   console.log("Checkout: /api/checkout");
+  console.log("Checkout exames: /api/checkout/exames");
+  console.log("Checkout consultas: /api/checkout/consultas");
   console.log("Webhook: /api/webhooks/pagarme");
   console.log("Usuários: /api/usuarios");
   console.log("Perfis: /api/perfis");
